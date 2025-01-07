@@ -2,67 +2,67 @@ version: '3.8'
 
 services:
 
-  traefik:
-    image: "traefik:v3.2"
-    container_name: "reverse-proxy"
-    command:
-      - "--log.level=DEBUG"
-      - "--api.insecure=true"
-      - "--providers.docker=true"
-      - "--providers.docker.exposedbydefault=false"
-      - "--entryPoints.web.address=:80"
-      - "--entryPoints.websecure.address=:443"
-      - "--certificatesresolvers.myresolver.acme.dnschallenge=true"
-      - "--certificatesresolvers.myresolver.acme.dnschallenge.provider=cloudflare"
-      # - "--certificatesresolvers.myresolver.acme.caserver=https://acme-staging-v02.api.letsencrypt.org/directory"
-      - "--certificatesresolvers.myresolver.acme.email=yourfriendshouseco@gmail.com"
-      - "--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json"
+  # traefik:
+  #   image: "traefik:v3.2"
+  #   container_name: "reverse-proxy"
+  #   command:
+  #     - "--log.level=DEBUG"
+  #     - "--api.insecure=true"
+  #     - "--providers.docker=true"
+  #     - "--providers.docker.exposedbydefault=false"
+  #     - "--entryPoints.web.address=:80"
+  #     - "--entryPoints.websecure.address=:443"
+  #     - "--certificatesresolvers.myresolver.acme.dnschallenge=true"
+  #     - "--certificatesresolvers.myresolver.acme.dnschallenge.provider=cloudflare"
+  #     # - "--certificatesresolvers.myresolver.acme.caserver=https://acme-staging-v02.api.letsencrypt.org/directory"
+  #     - "--certificatesresolvers.myresolver.acme.email=yourfriendshouseco@gmail.com"
+  #     - "--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json"
 
-    environment:
-      - CF_API_EMAIL=${CF_API_EMAIL}
-      - CF_DNS_API_TOKEN=${CF_DNS_API_TOKEN}
+  #   environment:
+  #     - CF_API_EMAIL=${CF_API_EMAIL}
+  #     - CF_DNS_API_TOKEN=${CF_DNS_API_TOKEN}
 
-    ports:
-      - "80:80"
-      - "443:443"
-      - "8080:8080"
-    volumes:
-      - "./letsencrypt:/letsencrypt"
-      - "/var/run/docker.sock:/var/run/docker.sock:ro"
-    networks: 
-      - reverse-proxy
+  #   ports:
+  #     - "80:80"
+  #     - "443:443"
+  #     - "8080:8080"
+  #   volumes:
+  #     - "./letsencrypt:/letsencrypt"
+  #     - "/var/run/docker.sock:/var/run/docker.sock:ro"
+  #   networks: 
+  #     - reverse-proxy
 
-  whoami:
-    image: "traefik/whoami"
-    container_name: "simple-service"
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.whoami.rule=Host(`whoami.yourfriendshouse.co`)"
-      - "traefik.http.routers.whoami.entrypoints=web"
-      - "traefik.http.routers.whoami.tls.certresolver=myresolver"
-    networks:
-      - reverse-proxy
-    # profiles:
-    #   - debug
-
-  # web:
-  #   build: .
-  #   container_name: python-app
+  # whoami:
+  #   image: "traefik/whoami"
+  #   container_name: "simple-service"
   #   labels:
   #     - "traefik.enable=true"
-  #     - "traefik.http.routers.web.rule=Host(`manabox.yourfriendshouse.co`)"
-  #     - "traefik.http.routers.web.entrypoints=websecure"
-  #     - "traefik.http.routers.web.tls.certresolver=myresolver"
-  #   # ports:
-  #   #   - "5000:5000"
-  #   volumes:
-  #     - ./scryfall.db:/app/scryfall.db
-  #   environment:
-  #     - FLASK_APP=app.py
-  #     - FLASK_ENV=production
+  #     - "traefik.http.routers.whoami.rule=Host(`whoami.yourfriendshouse.co`)"
+  #     - "traefik.http.routers.whoami.entrypoints=websecure"
+  #     - "traefik.http.routers.whoami.tls.certresolver=myresolver"
   #   networks:
   #     - reverse-proxy
-  #   restart: unless-stopped
+  #   # profiles:
+  #   #   - debug
+
+  web:
+    build: .
+    container_name: python-app
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.web.rule=Host(`manabox.yourfriendshouse.co`)"
+      - "traefik.http.routers.web.entrypoints=websecure"
+      - "traefik.http.routers.web.tls.certresolver=myresolver"
+    ports:
+      - "80:5000"
+    volumes:
+      - ./scryfall.db:/app/scryfall.db
+    environment:
+      - FLASK_APP=app.py
+      - FLASK_ENV=production
+    networks:
+      - reverse-proxy
+    restart: unless-stopped
 
 
 networks:
