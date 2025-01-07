@@ -9,7 +9,7 @@ def download_scryfall_json():
     url = 'https://api.scryfall.com/bulk-data'
     response = requests.get(url)
     data = response.json()
-    download_uri = data['data'][0]['download_uri']
+    download_uri = data['data'][2]['download_uri']
     response = requests.get(download_uri)
     with open('scryfall.json', 'w') as f:
         json.dump(response.json(), f)
