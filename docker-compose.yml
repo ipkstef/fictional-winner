@@ -53,8 +53,8 @@ services:
       - "traefik.http.routers.web.rule=Host(`manabox.yourfriendshouse.co`)"
       - "traefik.http.routers.web.entrypoints=websecure"
       - "traefik.http.routers.web.tls.certresolver=myresolver"
-    ports:
-      - "5000:5000"
+    # ports:
+    #   - "5000:5000"
     volumes:
       - ./scryfall.db:/app/scryfall.db
     environment:
