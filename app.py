@@ -1,19 +1,17 @@
-from flask import Flask, render_template, request, send_file
+from flask import Flask, render_template, request, jsonify
 import pandas as pd
 import sqlite3
-from pathlib import Path
-import io
-import os
+from io import StringIO
 
 app = Flask(__name__)
 
-def process_mtg_cards(file, database_path, condition):
+def process_mtg_cards(csv_text, database_path, condition):
     """
-    Process MTG card data from uploaded CSV, match with Scryfall database, and create output CSV.
+    Process MTG card data from CSV text, match with Scryfall database.
     """
     try:
-        # Read input CSV from uploaded file
-        df = pd.read_csv(file)
+        # Read CSV from string
+        df = pd.read_csv(StringIO(csv_text))
         
         # Connect to SQLite database
         conn = sqlite3.connect(database_path)
@@ -41,16 +39,19 @@ def process_mtg_cards(file, database_path, condition):
         
         # Process each row and collect results
         results = []
+        errors = []
         
-        for _, row in df.iterrows():
+        for idx, row in df.iterrows():
             try:
                 params = (row['Quantity'], row['Foil'], row['Scryfall ID'])
                 cursor = conn.execute(sql_query, params)
                 result = cursor.fetchone()
                 if result:
                     results.append(result)
-            except Exception:
-                continue
+                else:
+                    errors.append(f"No match found for row {idx + 1}: {row['Scryfall ID']}")
+            except Exception as e:
+                errors.append(f"Error processing row {idx + 1}: {str(e)}")
         
         # Create output DataFrame
         output_df = pd.DataFrame(results, columns=[
@@ -58,14 +59,13 @@ def process_mtg_cards(file, database_path, condition):
         ])
         output_df['Condition'] = condition
         
-        # Create CSV in memory
-        output = io.StringIO()
-        output_df.to_csv(output, index=False)
-        output.seek(0)
-        return output
+        # Convert back to CSV
+        output_csv = output_df.to_csv(index=False)
+        
+        return output_csv, errors
         
     except Exception as e:
-        raise e
+        return None, [f"Error processing CSV: {str(e)}"]
     finally:
         if 'conn' in locals():
             conn.close()
@@ -77,32 +77,26 @@ def index():
 
 @app.route('/process', methods=['POST'])
 def process():
-    if 'file' not in request.files:
-        return 'No file uploaded', 400
-    
-    file = request.files['file']
+    csv_text = request.form.get('csv_text', '')
     condition = request.form.get('condition', 'Lightly Played')
     
-    if file.filename == '':
-        return 'No file selected', 400
+    if not csv_text.strip():
+        return jsonify({'error': 'No CSV data provided'}), 400
         
     try:
-        # Use the database path from the container
         db_path = '/app/scryfall.db'
+        output_csv, errors = process_mtg_cards(csv_text, db_path, condition)
         
-        # Process the file
-        output = process_mtg_cards(file, db_path, condition)
-        
-        # Send the file back to the user
-        return send_file(
-            io.BytesIO(output.getvalue().encode('utf-8')),
-            mimetype='text/csv',
-            as_attachment=True,
-            download_name='processed_cards.csv'
-        )
+        if output_csv is None:
+            return jsonify({'error': errors[0]}), 400
+            
+        return jsonify({
+            'csv': output_csv,
+            'errors': errors
+        })
         
     except Exception as e:
-        return str(e), 500
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', debug=True)

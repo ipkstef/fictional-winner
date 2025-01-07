@@ -1,4 +1,3 @@
-<!-- templates/index.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -8,7 +7,7 @@
     <style>
         body {
             font-family: Arial, sans-serif;
-            max-width: 800px;
+            max-width: 1200px;
             margin: 0 auto;
             padding: 20px;
         }
@@ -26,12 +25,22 @@
             margin-bottom: 5px;
             font-weight: bold;
         }
-        select, input[type="file"] {
-            width: 100%;
+        select {
+            width: 200px;
             padding: 8px;
             margin-bottom: 10px;
             border: 1px solid #ddd;
             border-radius: 4px;
+        }
+        textarea {
+            width: 100%;
+            height: 200px;
+            padding: 8px;
+            margin-bottom: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-family: monospace;
+            resize: vertical;
         }
         button {
             background-color: #4CAF50;
@@ -44,15 +53,33 @@
         button:hover {
             background-color: #45a049;
         }
+        #result {
+            margin-top: 20px;
+        }
+        #errors {
+            color: red;
+            margin-top: 10px;
+        }
+        .copy-button {
+            background-color: #008CBA;
+            margin-left: 10px;
+        }
+        .copy-button:hover {
+            background-color: #007399;
+        }
+        .result-container {
+            position: relative;
+            margin-top: 20px;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>MTG Card Processor</h1>
-        <form action="/process" method="post" enctype="multipart/form-data">
+        <form id="processForm">
             <div class="form-group">
-                <label for="file">Upload CSV File:</label>
-                <input type="file" id="file" name="file" accept=".csv" required>
+                <label for="csv_text">Paste CSV Data:</label>
+                <textarea id="csv_text" name="csv_text" placeholder="Paste your CSV data here..."></textarea>
             </div>
             
             <div class="form-group">
@@ -66,6 +93,48 @@
             
             <button type="submit">Process Cards</button>
         </form>
+
+        <div class="result-container">
+            <label for="output">Output:</label>
+            <textarea id="output" readonly></textarea>
+            <button class="copy-button" onclick="copyOutput()">Copy Output</button>
+        </div>
+        <div id="errors"></div>
     </div>
+
+    <script>
+        document.getElementById('processForm').onsubmit = function(e) {
+            e.preventDefault();
+            
+            const formData = new FormData(this);
+            
+            fetch('/process', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    document.getElementById('errors').textContent = data.error;
+                    document.getElementById('output').value = '';
+                } else {
+                    document.getElementById('output').value = data.csv;
+                    document.getElementById('errors').innerHTML = data.errors.length ? 
+                        'Warnings:<br>' + data.errors.join('<br>') : '';
+                }
+            })
+            .catch(error => {
+                document.getElementById('errors').textContent = 'Error: ' + error.message;
+                document.getElementById('output').value = '';
+            });
+        };
+
+        function copyOutput() {
+            const output = document.getElementById('output');
+            output.select();
+            document.execCommand('copy');
+            alert('Output copied to clipboard!');
+        }
+    </script>
 </body>
 </html>

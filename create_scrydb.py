@@ -112,6 +112,8 @@ if __name__ == "__main__":
         
     json_to_sqlite(sys.argv[1], sys.argv[2], sys.argv[3])
 
+    # download_scryfall_json()
+
 
 
     
