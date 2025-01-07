@@ -45,24 +45,24 @@ services:
     # profiles:
     #   - debug
 
-  web:
-    build: .
-    container_name: python-app
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.web.rule=Host(`manabox.yourfriendshouse.co`)"
-      - "traefik.http.routers.web.entrypoints=websecure"
-      - "traefik.http.routers.web.tls.certresolver=myresolver"
-    # ports:
-    #   - "5000:5000"
-    volumes:
-      - ./scryfall.db:/app/scryfall.db
-    environment:
-      - FLASK_APP=app.py
-      - FLASK_ENV=production
-    networks:
-      - reverse-proxy
-    restart: unless-stopped
+  # web:
+  #   build: .
+  #   container_name: python-app
+  #   labels:
+  #     - "traefik.enable=true"
+  #     - "traefik.http.routers.web.rule=Host(`manabox.yourfriendshouse.co`)"
+  #     - "traefik.http.routers.web.entrypoints=websecure"
+  #     - "traefik.http.routers.web.tls.certresolver=myresolver"
+  #   # ports:
+  #   #   - "5000:5000"
+  #   volumes:
+  #     - ./scryfall.db:/app/scryfall.db
+  #   environment:
+  #     - FLASK_APP=app.py
+  #     - FLASK_ENV=production
+  #   networks:
+  #     - reverse-proxy
+  #   restart: unless-stopped
 
 
 networks:
