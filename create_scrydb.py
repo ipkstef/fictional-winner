@@ -4,16 +4,25 @@ import sys
 from typing import Any, Dict, List
 import requests
 
-# download scryfall json and save it to a file
+# # download scryfall json and save it to a file
+# def download_scryfall_json():
+#     url = 'https://api.scryfall.com/bulk-data'
+#     response = requests.get(url)
+#     data = response.json()
+#     download_uri = data['data'][2]['download_uri']
+#     response = requests.get(download_uri)
+#     with open('scryfall.json', 'w') as f:
+#         json.dump(response.json(), f)
+
+#Instead of loading the entire JSON into memory, stream and write it in chunks:
 def download_scryfall_json():
-    url = 'https://api.scryfall.com/bulk-data'
-    response = requests.get(url)
-    data = response.json()
-    download_uri = data['data'][2]['download_uri']
-    response = requests.get(download_uri)
-    with open('scryfall.json', 'w') as f:
-        json.dump(response.json(), f)
-        
+    url = "https://api.scryfall.com/bulk-data"
+    response = requests.get(url, stream=True)
+    response.raise_for_status()  # Ensure the request was successful
+
+    with open("scryfall.json", "wb") as f:
+        for chunk in response.iter_content(chunk_size=8192):
+            f.write(chunk)
 
 def detect_column_types(data: List[Dict[str, Any]]) -> Dict[str, str]:
     """Detect SQL column types based on JSON data types."""
