@@ -125,20 +125,29 @@ def json_to_sqlite(json_file: str, db_file: str, table_name: str) -> None:
         sys.exit(1)
 
 if __name__ == "__main__":
-    
-    # ask which function the user wants to run
-    answer = input("create or populate")
 
-    if answer == "populate":
+
         if len(sys.argv) != 4:
             print("Usage: python script.py <json_file> <db_file> <table_name>")
             sys.exit(1)
             
         json_to_sqlite(sys.argv[1], sys.argv[2], sys.argv[3])
-    elif answer == "create":
-        download_scryfall_json()
-    else:
-        pass
+
+
+
+    # # ask which function the user wants to run
+    # answer = input("create or populate")
+
+    # if answer == "populate":
+    #     if len(sys.argv) != 4:
+    #         print("Usage: python script.py <json_file> <db_file> <table_name>")
+    #         sys.exit(1)
+            
+    #     json_to_sqlite(sys.argv[1], sys.argv[2], sys.argv[3])
+    # elif answer == "create":
+    #     download_scryfall_json()
+    # else:
+    #     pass
 
 
     
