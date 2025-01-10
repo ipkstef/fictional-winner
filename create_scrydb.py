@@ -16,10 +16,20 @@ import requests
 
 #Instead of loading the entire JSON into memory, stream and write it in chunks:
 def download_scryfall_json():
-    url = "https://api.scryfall.com/bulk-data"
-    response = requests.get(url, stream=True)
+    # Step 1: Fetch metadata from Scryfall's bulk data endpoint
+    metadata_url = "https://api.scryfall.com/bulk-data"
+    metadata_response = requests.get(metadata_url)
+    metadata_response.raise_for_status()  # Ensure the request was successful
+    
+    # Step 2: Parse the JSON response and get the desired download URI
+    metadata = metadata_response.json()
+    download_uri = metadata['data'][2]['download_uri']  # Select index 2 as in the original function
+    
+    # Step 3: Stream the bulk data from the download URI
+    response = requests.get(download_uri, stream=True)
     response.raise_for_status()  # Ensure the request was successful
 
+    # Step 4: Write the data to a file in chunks
     with open("scryfall.json", "wb") as f:
         for chunk in response.iter_content(chunk_size=8192):
             f.write(chunk)
