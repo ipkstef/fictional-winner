@@ -2,16 +2,24 @@ from flask import Flask, render_template, request, jsonify
 import pandas as pd
 import sqlite3
 from io import StringIO
+import csv
 
 app = Flask(__name__)
 
 def process_mtg_cards(csv_text, database_path, condition):
-    """
-    Process MTG card data from CSV text, match with Scryfall database.
-    """
+    conn = None
     try:
-        # Read CSV from string
-        df = pd.read_csv(StringIO(csv_text))
+        # Use csv reader with quote character and quoting mode
+        csv_file = StringIO(csv_text)
+        csv_reader = csv.reader(csv_file, 
+                                quotechar='"', 
+                                delimiter=',', 
+                                quoting=csv.QUOTE_MINIMAL)
+        
+        # Convert to DataFrame
+        headers = next(csv_reader)
+        rows = [row for row in csv_reader]
+        df = pd.DataFrame(rows, columns=headers)
         
         # Connect to SQLite database
         conn = sqlite3.connect(database_path)
@@ -27,7 +35,7 @@ def process_mtg_cards(csv_text, database_path, condition):
             CASE 
                 WHEN m.foil AND NOT m.nonfoil THEN 'Foil'
                 WHEN NOT m.foil AND m.nonfoil THEN 'Normal'
-                WHEN m.foil AND m.nonfoil THEN 
+                WHEN m.foil AND m.nonfoil THEN
                     CASE 
                         WHEN ? = 'foil' THEN 'Foil'
                         ELSE 'Normal'
@@ -43,6 +51,11 @@ def process_mtg_cards(csv_text, database_path, condition):
         
         for idx, row in df.iterrows():
             try:
+                # Skip rows with empty Scryfall ID or Purchase price
+                if pd.isna(row['Scryfall ID']) or pd.isna(row['Purchase price']):
+                    errors.append(f"Skipped row {idx + 1}: Missing Scryfall ID or Purchase price")
+                    continue
+                
                 params = (row['Quantity'], row['Foil'], row['Scryfall ID'])
                 cursor = conn.execute(sql_query, params)
                 result = cursor.fetchone()
@@ -63,11 +76,12 @@ def process_mtg_cards(csv_text, database_path, condition):
         output_csv = output_df.to_csv(index=False)
         
         return output_csv, errors
-        
+    
     except Exception as e:
         return None, [f"Error processing CSV: {str(e)}"]
+    
     finally:
-        if 'conn' in locals():
+        if conn:
             conn.close()
 
 @app.route('/', methods=['GET'])
@@ -82,21 +96,21 @@ def process():
     
     if not csv_text.strip():
         return jsonify({'error': 'No CSV data provided'}), 400
-        
+    
     try:
         db_path = '/app/scryfall.db'
         output_csv, errors = process_mtg_cards(csv_text, db_path, condition)
         
         if output_csv is None:
             return jsonify({'error': errors[0]}), 400
-            
+        
         return jsonify({
             'csv': output_csv,
             'errors': errors
         })
-        
+    
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(host="0.0.0.0", debug=False)
+    app.run(host="0.0.0.0", debug=True)

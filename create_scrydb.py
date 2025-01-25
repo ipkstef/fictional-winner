@@ -83,15 +83,46 @@ def insert_data(cursor: sqlite3.Cursor, table_name: str, data: List[Dict[str, An
     insert_query = f'INSERT INTO "{table_name}" ({columns_str}) VALUES ({placeholders})'
     
     for item in data:
-        # Convert any complex objects (dict/list) to JSON string
         values = []
         for col in columns:
             val = item.get(col)
             if isinstance(val, (dict, list)):
-                values.append(json.dumps(val))
+                values.append(json.dumps(val))  # Serialize complex objects
+            elif isinstance(val, float) and col == "tcgplayer_id":
+                values.append(int(val))  # Ensure Product ID is stored as integer
             else:
                 values.append(val)
         cursor.execute(insert_query, values)
+
+
+    # Open a log file in append mode
+    with open('inr_debug.log', 'a') as log_file:
+        for item in data:
+            # Check if the item's set code is "INR"
+            if item.get('set') == 'inr':  # Scryfall set codes are usually lowercase
+                values = []
+                for col in columns:
+                    val = item.get(col)
+                    if isinstance(val, (dict, list)):
+                        values.append(json.dumps(val))
+                    else:
+                        values.append(val)
+                # Write the values to the log file
+                log_file.write(f"{values}\n")
+            cursor.execute(insert_query, values)
+
+
+def validate_table(cursor: sqlite3.Cursor, table_name: str):
+    """Validate table schema and data types."""
+    cursor.execute(f'PRAGMA table_info({table_name});')
+    schema = cursor.fetchall()
+    print("Schema:", schema)
+
+    cursor.execute(f'SELECT DISTINCT typeof(tcgplayer_id) FROM {table_name};')
+    print("Product ID types:", cursor.fetchall())
+
+
+        
 
 def json_to_sqlite(json_file: str, db_file: str, table_name: str) -> None:
     """Convert JSON file to SQLite database."""
@@ -125,13 +156,16 @@ def json_to_sqlite(json_file: str, db_file: str, table_name: str) -> None:
         sys.exit(1)
 
 if __name__ == "__main__":
-
-
-        if len(sys.argv) != 4:
-            print("Usage: python script.py <json_file> <db_file> <table_name>")
-            sys.exit(1)
-            
-        json_to_sqlite(sys.argv[1], sys.argv[2], sys.argv[3])
+    if len(sys.argv) != 4:
+        print("Usage: python script.py <json_file> <db_file> <table_name>")
+        sys.exit(1)
+        
+    json_to_sqlite(sys.argv[1], sys.argv[2], sys.argv[3])
+    
+    # Validate schema and data types
+    conn = sqlite3.connect(sys.argv[2])
+    validate_table(conn.cursor(), sys.argv[3])
+    conn.close()
 
 
 
