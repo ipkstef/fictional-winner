@@ -167,7 +167,7 @@ if __name__ == "__main__":
     validate_table(conn.cursor(), sys.argv[3])
     conn.close()
 
-
+    
 
     # # ask which function the user wants to run
     # answer = input("create or populate")
