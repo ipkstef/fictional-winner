@@ -4,15 +4,6 @@ import sys
 from typing import Any, Dict, List
 import requests
 
-# # download scryfall json and save it to a file
-# def download_scryfall_json():
-#     url = 'https://api.scryfall.com/bulk-data'
-#     response = requests.get(url)
-#     data = response.json()
-#     download_uri = data['data'][2]['download_uri']
-#     response = requests.get(download_uri)
-#     with open('scryfall.json', 'w') as f:
-#         json.dump(response.json(), f)
 
 #Instead of loading the entire JSON into memory, stream and write it in chunks:
 def download_scryfall_json():
@@ -89,17 +80,15 @@ def insert_data(cursor: sqlite3.Cursor, table_name: str, data: List[Dict[str, An
             if isinstance(val, (dict, list)):
                 values.append(json.dumps(val))  # Serialize complex objects
             elif isinstance(val, float) and col == "tcgplayer_id":
-                values.append(int(val))  # Ensure Product ID is stored as integer
+                values.append(int(val))  # Ensure Product ID is stored as an integer
             else:
                 values.append(val)
         cursor.execute(insert_query, values)
-
-
-    # Open a log file in append mode
+    
+    # Optional: Log items with set code 'inr' without reinserting them
     with open('inr_debug.log', 'a') as log_file:
         for item in data:
-            # Check if the item's set code is "INR"
-            if item.get('set') == 'inr':  # Scryfall set codes are usually lowercase
+            if item.get('set') == 'dft':  # Scryfall set codes are usually lowercase
                 values = []
                 for col in columns:
                     val = item.get(col)
@@ -107,9 +96,9 @@ def insert_data(cursor: sqlite3.Cursor, table_name: str, data: List[Dict[str, An
                         values.append(json.dumps(val))
                     else:
                         values.append(val)
-                # Write the values to the log file
                 log_file.write(f"{values}\n")
-            cursor.execute(insert_query, values)
+
+
 
 
 def validate_table(cursor: sqlite3.Cursor, table_name: str):
@@ -167,21 +156,6 @@ if __name__ == "__main__":
     validate_table(conn.cursor(), sys.argv[3])
     conn.close()
 
-    
-
-    # # ask which function the user wants to run
-    # answer = input("create or populate")
-
-    # if answer == "populate":
-    #     if len(sys.argv) != 4:
-    #         print("Usage: python script.py <json_file> <db_file> <table_name>")
-    #         sys.exit(1)
-            
-    #     json_to_sqlite(sys.argv[1], sys.argv[2], sys.argv[3])
-    # elif answer == "create":
-    #     download_scryfall_json()
-    # else:
-    #     pass
-
+    # download_scryfall_json()
 
     
