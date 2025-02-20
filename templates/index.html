@@ -58,9 +58,23 @@
         #result {
             margin-top: 20px;
         }
-        #errors {
-            color: red;
-            margin-top: 10px;
+        .error-container {
+            margin-top: 20px;
+            padding: 10px;
+            border: 1px solid #ffcccc;
+            border-radius: 4px;
+            background-color: #fff5f5;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .error-item {
+            padding: 8px;
+            margin-bottom: 8px;
+            background-color: #ffe6e6;
+            border-left: 4px solid #ff4d4d;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 14px;
         }
         .copy-button {
             background-color: #008CBA;
@@ -103,7 +117,7 @@
             <textarea id="output" readonly></textarea>
             <button class="copy-button" onclick="copyOutput()">Copy Output</button>
         </div>
-        <div id="errors"></div>
+        <div id="errors" class="error-container"></div>
     </div>
 
     <script>
@@ -119,16 +133,20 @@
             .then(response => response.json())
             .then(data => {
                 if (data.error) {
-                    document.getElementById('errors').textContent = data.error;
+                    document.getElementById('errors').innerHTML = `<div class="error-item">${data.error}</div>`;
                     document.getElementById('output').value = '';
                 } else {
                     document.getElementById('output').value = data.csv;
-                    document.getElementById('errors').innerHTML = data.errors.length ? 
-                        'Warnings:<br>' + data.errors.join('<br>') : '';
+                    if (data.errors.length) {
+                        const errorHtml = data.errors.map(error => `<div class="error-item">${error}</div>`).join('');
+                        document.getElementById('errors').innerHTML = errorHtml;
+                    } else {
+                        document.getElementById('errors').innerHTML = '';
+                    }
                 }
             })
             .catch(error => {
-                document.getElementById('errors').textContent = 'Error: ' + error.message;
+                document.getElementById('errors').innerHTML = `<div class="error-item">Error: ${error.message}</div>`;
                 document.getElementById('output').value = '';
             });
         };
