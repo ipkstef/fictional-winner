@@ -4,7 +4,10 @@ import sys
 from typing import Any, Dict, List
 import requests
 
+<<<<<<< HEAD
 
+=======
+>>>>>>> 53257055f25f5db4113a44c63de5112ae89c8543
 
 #Instead of loading the entire JSON into memory, stream and write it in chunks:
 def download_scryfall_json():
@@ -87,7 +90,11 @@ def insert_data(cursor: sqlite3.Cursor, table_name: str, data: List[Dict[str, An
         cursor.execute(insert_query, values)
     
     # Optional: Log items with set code 'inr' without reinserting them
+<<<<<<< HEAD
     with open('dft_debug.log', 'a') as log_file:
+=======
+    with open('inr_debug.log', 'a') as log_file:
+>>>>>>> 53257055f25f5db4113a44c63de5112ae89c8543
         for item in data:
             if item.get('set') == 'dft':  # Scryfall set codes are usually lowercase
                 values = []
@@ -99,6 +106,10 @@ def insert_data(cursor: sqlite3.Cursor, table_name: str, data: List[Dict[str, An
                         values.append(val)
                 log_file.write(f"{values}\n")
 
+<<<<<<< HEAD
+=======
+
+>>>>>>> 53257055f25f5db4113a44c63de5112ae89c8543
 
 
 def validate_table(cursor: sqlite3.Cursor, table_name: str):
@@ -156,7 +167,11 @@ if __name__ == "__main__":
     validate_table(conn.cursor(), sys.argv[3])
     conn.close()
 
+<<<<<<< HEAD
     # download_scryfall_json()    
 
+=======
+    # download_scryfall_json()
+>>>>>>> 53257055f25f5db4113a44c63de5112ae89c8543
 
     
