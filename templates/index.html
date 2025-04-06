@@ -7,6 +7,46 @@
     <title>Database Status: Tarkir: DragonStorm</title>
        
     <style>
+        .banner {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            background-color: #ff4444;
+            color: white;
+            text-align: center;
+            padding: 15px 20px;
+            z-index: 1000;
+            font-size: 16px;
+        }
+    
+        .banner-link {
+            color: white;
+            text-decoration: underline;
+            font-weight: bold;
+            margin-left: 5px;
+        }
+    
+        .banner-link:hover {
+            color: #ffdddd;
+        }
+    
+        .close-btn {
+            position: absolute;
+            right: 20px;
+            cursor: pointer;
+            font-size: 24px;
+            line-height: 1;
+        }
+    
+        .close-btn:hover {
+            color: #ffdddd;
+        }
+    
+        /* Update existing body padding to prevent content hiding */
+        body {
+            padding: 70px 20px 20px;
+        }
         body {
             font-family: Arial, sans-serif;
             max-width: 1200px;
@@ -90,6 +130,11 @@
     </style>
 </head>
 <body>
+    <div class="banner">
+        This site is moving to our new <a href="https://tools.yourfriendshouse.co/" target="_blank" class="banner-link">toolsuite</a>. 
+        <span class="close-btn" onclick="this.parentElement.style.display='none';">×</span>
+    </div>
+    
     <div class="container">
         <h1>MTG Card Processor</h1>
         <h2 style="display: inline-block; vertical-align: middle;">Database Status: </h2> 
