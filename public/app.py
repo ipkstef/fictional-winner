@@ -15,7 +15,7 @@ app.config['UPLOAD_FOLDER'] = tempfile.gettempdir()
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # Limit upload size to 16MB
 
 # ───────── CONFIG ─────────
-DB_FILE = "mtg.db"
+DB_FILE = "/app/database/mtg.db"
 
 # Add context processor for templates
 @app.context_processor
