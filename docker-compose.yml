@@ -8,16 +8,11 @@ services:
     ports:
       - "5000:5000"
     volumes:
-      - ./:/app
-      - ./mtg.db:/app/mtg.db  # Direct mounting of just the database file
+      - ./public:/app
+      - ./mtg.db:/app/mtg.db
     environment:
       - FLASK_APP=app.py
       - FLASK_ENV=production
     networks:
       - mtg-network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
+
