@@ -9,7 +9,7 @@ services:
       - "5000:5000"
     volumes:
       - ./public:/app
-      - ./mtg.db:/app/mtg.db:ro
+      - ./mtg.db:/app/database/mtg.db:ro
     environment:
       - FLASK_APP=app.py
       - FLASK_ENV=production

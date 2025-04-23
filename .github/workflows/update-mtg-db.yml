@@ -49,10 +49,10 @@ jobs:
           
           # Stop the container, replace the database, and start it again
           ssh server "cd ${{ secrets.DOCKER_COMMAND_LOCATION }} && \
-            docker compose stop mtg-csv && \
+            docker compose down mtg-csv && \
             cd ${{ secrets.DATABASE_LOCATION }} && \
             mv mtg.db.new mtg.db && \
             cd ${{ secrets.DOCKER_COMMAND_LOCATION }} && \
-            docker compose start mtg-csv"
+            docker compose up -d  mtg-csv"
             
           echo "Database successfully updated and service restarted"
