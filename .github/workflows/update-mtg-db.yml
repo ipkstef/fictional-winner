@@ -44,13 +44,15 @@ jobs:
           
       - name: Deploy to production server
         run: |
-          # Transfer the new database to a temporary location
-          scp mtg.db server:/home/${{ secrets.SSH_USER }}/mtg.db.new
+          # Transfer the new database directly to the destination folder
+          scp mtg.db server:${{ secrets.DATABASE_LOCATION }}/mtg.db.new
           
           # Stop the container, replace the database, and start it again
           ssh server "cd ${{ secrets.DOCKER_COMMAND_LOCATION }} && \
             docker compose stop mtg-csv && \
-            mv /home/${{ secrets.SSH_USER }}/mtg.db.new ${{ secrets.DATABASE_LOCATION }}/mtg.db && \
-            docker compose start mtg-csv -d"
+            cd ${{ secrets.DATABASE_LOCATION }} && \
+            mv mtg.db.new mtg.db && \
+            cd ${{ secrets.DOCKER_COMMAND_LOCATION }} && \
+            docker compose start mtg-csv"
             
           echo "Database successfully updated and service restarted"
