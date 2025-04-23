@@ -31,6 +31,31 @@ def finish_for_sku(finish_raw):
     """
     return "NON FOIL" if finish_raw.lower() == "normal" else "FOIL"
 
+def map_condition(condition_raw):
+    """
+    Maps ManaBox condition values to TCGplayer standardized condition values
+    
+    mint,near_mint,excellent -> NEAR MINT
+    good, light_played -> LIGHTLY PLAYED
+    played -> MODERATELY PLAYED
+    poor -> HEAVILY PLAYED
+    """
+    # Convert to lowercase and remove underscores for consistent comparison
+    condition = condition_raw.lower().replace('_', '')
+    
+    # Map to TCGPlayer conditions
+    if condition in ['mint', 'nearmint', 'excellent']:
+        return 'NEAR MINT'
+    elif condition in ['good', 'lightplayed']:
+        return 'LIGHTLY PLAYED'
+    elif condition in ['played']:
+        return 'MODERATELY PLAYED'
+    elif condition in ['poor']:
+        return 'HEAVILY PLAYED'
+    else:
+        # Return the original value if no mapping is found, just formatted
+        return condition_raw.replace('_', ' ').upper()
+
 def process_csv_content(csv_content):
     """
     Process CSV content directly (from pasted text)
@@ -73,7 +98,7 @@ def process_csv_content(csv_content):
             scry_id = row["Scryfall ID"].strip()
             qty = row["Quantity"].strip()
             price = row["Purchase price"].strip()
-            cond_raw = row["Condition"].replace("_", " ").upper()  # e.g. "NEAR MINT"
+            cond_raw = map_condition(row["Condition"])  # Map to standardized condition
             finish_raw = row["Foil"].strip()  # e.g. "normal", "foil", "etched"
             finish_sku = finish_for_sku(finish_raw)  # "NON FOIL" or "FOIL"
             
@@ -193,7 +218,7 @@ def process_csv(input_file_path):
                 scry_id = row["Scryfall ID"].strip()
                 qty = row["Quantity"].strip()
                 price = row["Purchase price"].strip()
-                cond_raw = row["Condition"].replace("_", " ").upper()  # e.g. "NEAR MINT"
+                cond_raw = map_condition(row["Condition"])  # Map to standardized condition
                 finish_raw = row["Foil"].strip()  # e.g. "normal", "foil", "etched"
                 finish_sku = finish_for_sku(finish_raw)  # "NON FOIL" or "FOIL"
                 
