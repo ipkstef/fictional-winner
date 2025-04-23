@@ -99,27 +99,7 @@ def load_scryfall(conn: sqlite3.Connection, scryfall_json: str):
         ))
     conn.commit()
 
-# def load_skus(conn: sqlite3.Connection, skus_json: str):
-#     """
-#     Loads TcgplayerSkus.json into the sku table.
-#     """
-#     cur = conn.cursor()
-#     with open(skus_json, 'r', encoding='utf-8') as f:
-#         raw = json.load(f)["data"]
-#     for uuid, entries in raw.items():
-#         for e in entries:
-#             cur.execute("""
-#                 INSERT INTO sku(uuid, productId, skuId, condition, language, printing)
-#                 VALUES (?, ?, ?, ?, ?, ?);
-#             """, (
-#                 uuid,
-#                 e["productId"],
-#                 e["skuId"],
-#                 e["condition"],
-#                 e["language"],
-#                 e["printing"]
-#             ))
-#     conn.commit()
+
 
 def load_skus_streaming(conn, skus_bz2_path):
     cur = conn.cursor()
@@ -154,7 +134,7 @@ if __name__ == "__main__":
     conn = create_db(args.db)
     if args.download:
         try:    
-            # download_scryfall_json()
+            download_scryfall_json()
             download_mtgjsonsku_json()
             sys.exit(0)
         except Exception as e:

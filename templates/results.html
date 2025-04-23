@@ -1,0 +1,117 @@
+{% extends "layout.html" %}
+
+{% block title %}Processing Results - MTG CSV Processor{% endblock %}
+
+{% block additional_styles %}
+.error-list {
+    max-height: 300px;
+    overflow-y: auto;
+}
+.stats-card {
+    text-align: center;
+}
+.stats-number {
+    font-size: 2.5rem;
+    font-weight: bold;
+    color: #563d7c;
+}
+.stats-label {
+    font-size: 0.9rem;
+    color: #6c757d;
+    text-transform: uppercase;
+}
+.btn-success {
+    background-color: #28a745;
+    border-color: #28a745;
+}
+.btn-success:hover {
+    background-color: #218838;
+    border-color: #1e7e34;
+}
+.format-note {
+    background-color: #f8f9fa;
+    border-left: 4px solid #6c757d;
+    padding: 0.75rem;
+    margin-bottom: 1rem;
+    font-size: 0.85rem;
+}
+{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        <span class="header-icon">✅</span> Processing Complete
+    </div>
+    <div class="card-body">
+        <div class="row mb-4">
+            <div class="col-md-6">
+                <div class="card stats-card">
+                    <div class="card-body">
+                        <div class="stats-number text-success">{{ processed_count }}</div>
+                        <div class="stats-label">Cards Processed</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card stats-card">
+                    <div class="card-body">
+                        <div class="stats-number text-danger">{{ skipped_count }}</div>
+                        <div class="stats-label">Cards Skipped</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="format-note mb-3">
+            <strong>Note:</strong> The file download uses desktop format with "TCGplayer Id", "Add to Quantity", and "TCG Marketplace Price" headers.<br>
+            The mobile paste option uses "SKU" and "Quantity" headers instead.
+        </div>
+        
+        <div class="d-grid gap-2">
+            <a href="{{ url_for('download') }}" class="btn btn-success btn-lg">
+                <i class="bi bi-download"></i> Download TCGPlayer CSV
+            </a>
+            <a href="{{ url_for('index') }}" class="btn btn-outline-secondary">
+                <i class="bi bi-arrow-left"></i> Process Another File
+            </a>
+        </div>
+        
+        <form action="{{ url_for('cleanup') }}" method="post" class="mt-3">
+            <div class="d-grid">
+                <button type="submit" class="btn btn-outline-danger btn-sm">
+                    <i class="bi bi-trash"></i> Clean Up Temporary Files
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% if errors %}
+<div class="card">
+    <div class="card-header">
+        <span class="header-icon">⚠️</span> Processing Errors ({{ total_errors }})
+    </div>
+    <div class="card-body">
+        <div class="error-list">
+            <ul class="list-group">
+                {% for error in errors %}
+                <li class="list-group-item list-group-item-warning">{{ error }}</li>
+                {% endfor %}
+                {% if total_errors > 100 %}
+                <li class="list-group-item list-group-item-light text-center">
+                    ... and {{ total_errors - 100 }} more errors
+                </li>
+                {% endif %}
+            </ul>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<!-- Log the processing completion -->
+<script>
+    console.log("templates/results.html: Processing complete with {{ processed_count }} processed and {{ skipped_count }} skipped cards");
+</script>
+{% endblock %} 
