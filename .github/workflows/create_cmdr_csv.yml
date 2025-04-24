@@ -42,10 +42,11 @@ jobs:
           path: decklist_cmdr/tcgplayer_cmdr_csv.zip
           retention-days: 30
           overwrite: true
+          compression-level: 0
 
       - name: Post to Discord
         uses: appleboy/discord-action@v1.2.0
         with:
           webhook_url: ${{ secrets.DISCORD_WEBHOOK_URL }}
-          content: |
-            New CSV files available: https://github.com/ipkstef/fictional-winner/actions/runs/${{ github.run_id }}/artifacts/cmdr_csv
+          message: |
+            New CSV files available: ${{ steps.artifact_url.outputs.url }}
