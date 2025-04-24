@@ -30,23 +30,33 @@ jobs:
           python build_db.py --download True
           python build_db.py --db mtg.db --scry default-cards.json --skus TcgplayerSkus.json.bz2
 
-      - name: create Release zip of cmdr csv's 
+      - name: Create zip of CMDR CSVs
         run: | 
           python decklist_cmdr/build_cmdr_csv.py
-          zip decklist_cmdr/tcgplayer_cmdr_csv.zip decklist_cmdr/tcgplayer_cmdr_csv/*.csv
+          zip -r decklist_cmdr/tcgplayer_cmdr_csv.zip decklist_cmdr/tcgplayer_cmdr_csv/*.csv
+      
+      # Get date for release tag
+      - name: Get current date
+        id: date
+        run: echo "date=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
           
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      # Create GitHub Release with the zip file
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v2
         with:
-          name: cmdr_csv
-          path: decklist_cmdr/tcgplayer_cmdr_csv.zip
-          retention-days: 30
-          overwrite: true
-          compression-level: 0
+          tag_name: cmdr-csv-${{ steps.date.outputs.date }}
+          name: CMDR CSV ${{ steps.date.outputs.date }}
+          files: decklist_cmdr/tcgplayer_cmdr_csv.zip
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      # Post to Discord with the public download link
       - name: Post to Discord
         uses: appleboy/discord-action@v1.2.0
         with:
           webhook_url: ${{ secrets.DISCORD_WEBHOOK_URL }}
           message: |
-            New CSV files available: ${{ steps.artifact_url.outputs.url }}
+            New CSV files available for download: https://github.com/${{ github.repository }}/releases/download/cmdr-csv-${{ steps.date.outputs.date }}/tcgplayer_cmdr_csv.zip
