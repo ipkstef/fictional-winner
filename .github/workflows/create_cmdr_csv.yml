@@ -33,7 +33,7 @@ jobs:
       - name: create Release zip of cmdr csv's 
         run: | 
           python decklist_cmdr/build_cmdr_csv.py
-          zip decklist_cmdr\tcgplayer_cmdr_csv.zip decklist_cmdr\tcgplayer_cmdr_csv\*.csv
+          zip decklist_cmdr/tcgplayer_cmdr_csv.zip decklist_cmdr/tcgplayer_cmdr_csv/*.csv
           
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -48,4 +48,4 @@ jobs:
         with:
           webhook_url: ${{ secrets.DISCORD_WEBHOOK_URL }}
           content: |
-            New CSV files available: https://github.com/jasonthomas/sa-bots/actions/runs/${{ github.run_id }}/artifacts/cmdr_csv
+            New CSV files available: https://github.com/ipkstef/fictional-winner/actions/runs/${{ github.run_id }}/artifacts/cmdr_csv
