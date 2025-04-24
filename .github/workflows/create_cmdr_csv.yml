@@ -36,13 +36,15 @@ jobs:
           zip decklist_cmdr\tcgplayer_cmdr_csv.zip decklist_cmdr\tcgplayer_cmdr_csv\*.csv
           
       - name: Upload artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: cmdr_csv
           path: decklist_cmdr\tcgplayer_cmdr_csv.zip
+          retention-days: 30
+          overwrite: true
 
       - name: Post to Discord
-        uses: appleboy/discord-action@v1
+        uses: appleboy/discord-action@v1.2.0
         with:
           webhook_url: ${{ secrets.DISCORD_WEBHOOK_URL }}
           content: |

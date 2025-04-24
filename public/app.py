@@ -517,9 +517,6 @@ def server_error(e):
 
 # Run the application
 if __name__ == '__main__':
-    # Create templates directory if it doesn't exist
-    if not os.path.exists('templates'):
-        os.makedirs('templates')
     
     # Check if database exists
     if not os.path.exists(DB_FILE):
