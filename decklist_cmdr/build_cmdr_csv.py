@@ -54,6 +54,7 @@ def get_sku(conn, tcgplayer_id, is_foil=False):
 def process_deck(deck_path, output_dir, conn):
     print(f"decklist_cmdr/build_cmdr_csv.py: Processing {deck_path}")
     
+    
     # Load the deck JSON file
     with open(deck_path, 'r', encoding='utf-8') as f:
         deck_data = json.load(f)
@@ -149,6 +150,13 @@ def process_deck(deck_path, output_dir, conn):
         mainboard = deck_data.get('mainboard', {})
         for card_name, card_data in mainboard.items():
             card_info = card_data.get('card', {})
+            
+            # Skip basic lands
+            type_line = card_info.get('type_line', '')
+            if 'Basic Land' in type_line:
+                print(f"decklist_cmdr/build_cmdr_csv.py: Skipping basic land: {card_name}")
+                continue
+                
             tcgplayer_id = card_info.get('tcgplayer_id')
             quantity = card_data.get('quantity', 1)
             # If printingData exists and is a list, use it to generate rows for each finish
