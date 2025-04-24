@@ -59,4 +59,4 @@ jobs:
         with:
           webhook_url: ${{ secrets.DISCORD_WEBHOOK_URL }}
           message: |
-            New CSV files available for download: https://github.com/${{ github.repository }}/releases/download/cmdr-csv-${{ steps.date.outputs.date }}/tcgplayer_cmdr_csv.zip
+            Beep Boop! CommanderCSV files available for download: https://github.com/${{ github.repository }}/releases/download/cmdr-csv-${{ steps.date.outputs.date }}/tcgplayer_cmdr_csv.zip
