@@ -1,0 +1,49 @@
+name: Create CMDR CSV
+
+on:
+  schedule:
+    # Run monthly on Sunday at 3am UTC
+    - cron: '0 3 * * 0'
+  workflow_dispatch:
+    # Allow manual trigger
+
+jobs:
+  create-cmdr-csv:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests ijson bz2file
+          
+      - name: Download data and create database
+        run: |
+          python build_db.py --download True
+          python build_db.py --db mtg.db --scry default-cards.json --skus TcgplayerSkus.json.bz2
+
+      - name: create Release zip of cmdr csv's 
+        run: | 
+          python decklist_cmdr/build_cmdr_csv.py
+          zip decklist_cmdr\tcgplayer_cmdr_csv.zip decklist_cmdr\tcgplayer_cmdr_csv\*.csv
+          
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: cmdr_csv
+          path: decklist_cmdr\tcgplayer_cmdr_csv.zip
+
+      - name: Post to Discord
+        uses: appleboy/discord-action@v1
+        with:
+          webhook_url: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          content: |
+            New CSV files available: https://github.com/jasonthomas/sa-bots/actions/runs/${{ github.run_id }}/artifacts/cmdr_csv
