@@ -26,15 +26,27 @@ def get_sku(conn, tcgplayer_id, is_foil=False):
     condition = 'NEAR MINT'
     
     # Query the database to get the SKU for the card with the specified tcgplayer_id and finish
+    # First prioritize by language (English), condition exact match, printing exact match
+    # Then get consistent results by using a deterministic sort based on additional properties
     cursor.execute("""
-        SELECT s.skuId FROM sku s
+        SELECT s.skuId, s.condition, s.printing, s.language 
+        FROM sku s
         JOIN scryfall sf ON s.productId = sf.tcgplayer_id
-        WHERE sf.tcgplayer_id = ? AND s.printing = ? AND s.condition = ?
+        WHERE sf.tcgplayer_id = ? 
+        AND s.printing = ? 
+        AND s.condition = ?
+        ORDER BY 
+            CASE WHEN s.language = 'ENGLISH' THEN 0 ELSE 1 END,
+            CASE WHEN s.condition = ? THEN 0 ELSE 1 END,
+            CASE WHEN s.printing = ? THEN 0 ELSE 1 END,
+            s.skuId
         LIMIT 1
-    """, (tcgplayer_id, printing, condition ))
+    """, (tcgplayer_id, printing, condition, condition, printing))
     
     result = cursor.fetchone()
     if result:
+        # Log the exact SKU being chosen and why
+        print(f"decklist_cmdr/build_cmdr_csv.py: Selected SKU {result[0]} for tcgplayer_id {tcgplayer_id} with condition '{result[1]}', printing '{result[2]}', language '{result[3]}'")
         return result[0]
     return None
 
@@ -81,6 +93,34 @@ def process_deck(deck_path, output_dir, conn):
             # Validate commander matches main field
             if card_info.get('name') != main_card.get('name'):
                 print(f"decklist_cmdr/build_cmdr_csv.py: Warning: Commander '{card_info.get('name')}' does not match 'main' card '{main_card.get('name')}'.")
+            
+            # Edge case: No printingData available
+            if not printing_data_list:
+                print(f"decklist_cmdr/build_cmdr_csv.py: Commander {cmdr_name} has no printingData, using direct finish attribute")
+                tcgplayer_id = card_info.get('tcgplayer_id')
+                # Fall back to direct finish attribute from commander data
+                is_foil = cmdr_data.get('finish', '').lower() == 'foil' or cmdr_data.get('isFoil', False)
+                # Use price from JSON if available
+                price = None
+                if card_info.get('prices'):
+                    if is_foil and card_info['prices'].get('usd_foil'):
+                        price = card_info['prices']['usd_foil']
+                    elif card_info['prices'].get('usd'):
+                        price = card_info['prices']['usd']
+                if price is None:
+                    price = "500"
+                if tcgplayer_id:
+                    sku = get_sku(conn, tcgplayer_id, is_foil=is_foil)
+                    if sku:
+                        writer.writerow({
+                            "TCGplayer Id": sku,
+                            "Name": card_info.get('name', cmdr_name),
+                            "Add to Quantity": cmdr_data.get('quantity', 1),
+                            "TCG Marketplace Price": price
+                        })
+                        print(f"decklist_cmdr/build_cmdr_csv.py: Added commander {cmdr_name} with SKU {sku} (using direct finish)")
+                continue  # Skip normal printingData processing
+                
             # Use printingData for finish/foil
             for printing_data in printing_data_list:
                 tcgplayer_id = card_info.get('tcgplayer_id')
