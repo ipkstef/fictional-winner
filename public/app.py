@@ -17,6 +17,7 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # Limit upload size to 16MB
 # ───────── CONFIG ─────────
 DB_FILE = "/app/database/mtg.db"
 
+
 # Add context processor for templates
 @app.context_processor
 def inject_current_year():
@@ -35,21 +36,24 @@ def map_condition(condition_raw):
     """
     Maps ManaBox condition values to TCGplayer standardized condition values
     
-    mint,near_mint,excellent -> NEAR MINT
-    good, light_played -> LIGHTLY PLAYED
-    played -> MODERATELY PLAYED
-    poor -> HEAVILY PLAYED
+    mint,near_mint -> NEAR MINT
+    light_played -> LIGHTLY PLAYED
+    excellent,good -> MODERATELY PLAYED
+    played -> HEAVILY PLAYED
+    poor -> DAMAGED
     """
     # Convert to lowercase and remove underscores for consistent comparison
     condition = condition_raw.lower().replace('_', '')
     
     # Map to TCGPlayer conditions
-    if condition in ['mint', 'nearmint', 'excellent']:
+    if condition in ['mint', 'nearmint']:
         return 'NEAR MINT'
-    elif condition in ['good', 'lightplayed']:
+    elif condition in ['lightplayed']:
         return 'LIGHTLY PLAYED'
-    elif condition in ['played']:
+    elif condition in ['excellent', 'good']:
         return 'MODERATELY PLAYED'
+    elif condition in ['played']:
+        return 'HEAVILY PLAYED'
     elif condition in ['poor']:
         return 'HEAVILY PLAYED'
     else:
