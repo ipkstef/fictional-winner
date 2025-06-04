@@ -55,7 +55,7 @@ def map_condition(condition_raw):
     elif condition in ['played']:
         return 'HEAVILY PLAYED'
     elif condition in ['poor']:
-        return 'HEAVILY PLAYED'
+        return 'DAMAGED'
     else:
         # Return the original value if no mapping is found, just formatted
         return condition_raw.replace('_', ' ').upper()
