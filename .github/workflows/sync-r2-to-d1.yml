@@ -1,0 +1,53 @@
+name: Sync R2 to D1
+
+on:
+  schedule:
+    # Run on the 1st and 15th of each month at 03:00 UTC.
+    - cron: '0 3 1,15 * *'
+  workflow_dispatch:
+    # Allow manual runs for on-demand syncs or debugging.
+
+jobs:
+  sync-r2-to-d1:
+    # Use GitHub-hosted Ubuntu runners for predictable tool availability.
+    runs-on: ubuntu-latest
+
+    env:
+      # R2 credentials are required by sync_r2_to_d1.py.
+      R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+      # Cloudflare credentials are required by wrangler for D1 imports.
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Python dependencies
+        run: |
+          # Keep runtime deps explicit for deterministic CI.
+          python -m pip install --upgrade pip
+          pip install duckdb python-dotenv
+
+      - name: Install Wrangler CLI
+        run: |
+          # Provide wrangler for D1 import commands called via npx.
+          npm install --global wrangler
+
+      - name: Sync R2 Parquet to D1
+        run: |
+          # Execute the full sync pipeline (download, dump, import).
+          python sync_r2_to_d1.py
