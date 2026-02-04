@@ -2,3 +2,8 @@
 *.csv
 *.json
 *.bz2
+*.sql
+.wrangler
+node_modules
+.env
+wrangler.toml
