@@ -589,7 +589,7 @@ function getIndexHtml(): string {
 <!-- Status badge -->
 <div class="text-center mt-4">
     <a href="https://github.com/ipkstef/fictional-winner">
-        <img src="https://github.com/ipkstef/fictional-winner/actions/workflows/update-mtg-db.yml/badge.svg" alt="Update MTG Database Status">
+        <img src="https://github.com/ipkstef/fictional-winner/actions/workflows/sync-r2-to-d1.yml/badge.svg" alt="Sync R2 to D1">
     </a>
 </div>
 <!-- Ko-fi support link -->
