@@ -214,7 +214,7 @@ def create_sql_dumps() -> list[Path]:
         "skus": "sku_id",
     }
 
-    # 1. Schema dump (includes indexes) with safe CREATE IF NOT EXISTS.
+    # 1. Schema dump (includes indexes) with safe DROP/CREATE for D1 compatibility.
     schema_file = DUMP_DIR / "dump_schema.sql"
     log("  Dumping schema...", end=" ", flush=True)
     schema = subprocess.run(
@@ -226,11 +226,19 @@ def create_sql_dumps() -> list[Path]:
     schema_lines = []
     for line in schema.stdout.splitlines():
         if line.startswith("CREATE TABLE "):
-            schema_lines.append(line.replace("CREATE TABLE ", "CREATE TABLE IF NOT EXISTS ", 1))
+            # Keep SQLite-compatible DDL while avoiding "table already exists" errors.
+            table_name = line.split()[2]
+            schema_lines.append(f"DROP TABLE IF EXISTS {table_name};")
+            schema_lines.append(line)
         elif line.startswith("CREATE UNIQUE INDEX "):
-            schema_lines.append(line.replace("CREATE UNIQUE INDEX ", "CREATE UNIQUE INDEX IF NOT EXISTS ", 1))
+            # D1 can choke on IF NOT EXISTS here, so drop then create.
+            index_name = line.split()[3]
+            schema_lines.append(f"DROP INDEX IF EXISTS {index_name};")
+            schema_lines.append(line)
         elif line.startswith("CREATE INDEX "):
-            schema_lines.append(line.replace("CREATE INDEX ", "CREATE INDEX IF NOT EXISTS ", 1))
+            index_name = line.split()[2]
+            schema_lines.append(f"DROP INDEX IF EXISTS {index_name};")
+            schema_lines.append(line)
         else:
             schema_lines.append(line)
     schema_file.write_text("\n".join(schema_lines) + "\n")
