@@ -12,6 +12,7 @@ Usage:
 
 import argparse
 import os
+import re
 import sqlite3
 import subprocess
 import sys
@@ -225,23 +226,29 @@ def create_sql_dumps() -> list[Path]:
     )
     schema_lines = []
     for line in schema.stdout.splitlines():
-        if line.startswith("CREATE TABLE "):
-            # Keep SQLite-compatible DDL while avoiding "table already exists" errors.
-            # Strip trailing "(" in case schema is "CREATE TABLE foo(" without space.
-            table_name = line.split()[2].rstrip("(")
-            schema_lines.append(f"DROP TABLE IF EXISTS {table_name};")
-            schema_lines.append(line)
-        elif line.startswith("CREATE UNIQUE INDEX "):
-            # D1 can choke on IF NOT EXISTS here, so drop then create.
-            index_name = line.split()[3].rstrip("(")
-            schema_lines.append(f"DROP INDEX IF EXISTS {index_name};")
-            schema_lines.append(line)
-        elif line.startswith("CREATE INDEX "):
-            index_name = line.split()[2].rstrip("(")
-            schema_lines.append(f"DROP INDEX IF EXISTS {index_name};")
-            schema_lines.append(line)
+        # DuckDB may emit "IF NOT EXISTS" which D1 doesn't like; strip it and use DROP first.
+        clean_line = line.replace(" IF NOT EXISTS", "")
+        if clean_line.startswith("CREATE TABLE "):
+            # Extract table name using regex to handle quoted names and no-space-before-paren.
+            match = re.search(r'CREATE TABLE\s+"?(\w+)"?\s*\(', clean_line)
+            if match:
+                table_name = match.group(1)
+                schema_lines.append(f"DROP TABLE IF EXISTS {table_name};")
+            schema_lines.append(clean_line)
+        elif clean_line.startswith("CREATE UNIQUE INDEX "):
+            match = re.search(r'CREATE UNIQUE INDEX\s+"?(\w+)"?\s', clean_line)
+            if match:
+                index_name = match.group(1)
+                schema_lines.append(f"DROP INDEX IF EXISTS {index_name};")
+            schema_lines.append(clean_line)
+        elif clean_line.startswith("CREATE INDEX "):
+            match = re.search(r'CREATE INDEX\s+"?(\w+)"?\s', clean_line)
+            if match:
+                index_name = match.group(1)
+                schema_lines.append(f"DROP INDEX IF EXISTS {index_name};")
+            schema_lines.append(clean_line)
         else:
-            schema_lines.append(line)
+            schema_lines.append(clean_line)
     schema_file.write_text("\n".join(schema_lines) + "\n")
     log("done")
     dump_files.append(schema_file)
