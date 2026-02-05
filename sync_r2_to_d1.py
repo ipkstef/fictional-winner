@@ -12,6 +12,7 @@ Usage:
 
 import argparse
 import os
+import sqlite3
 import subprocess
 import sys
 from pathlib import Path
@@ -32,6 +33,86 @@ SQLITE_FILE = Path("tcg_data.db")
 DUMP_DIR = Path(".")  # Directory for dump files
 SKU_CHUNK_SIZE = 500_000  # Split SKUs into chunks to avoid D1 reset
 
+LOG_PREFIX = Path(__file__).name
+
+
+def log(message: str = "", **kwargs) -> None:
+    # Centralize logs so every message includes a file origin prefix.
+    print(f"{LOG_PREFIX}: {message}", **kwargs)
+
+
+def get_table_columns(sqlite_file: Path, table_name: str) -> list[str]:
+    # Read column order from SQLite so incremental merges stay schema-aligned.
+    with sqlite3.connect(sqlite_file) as conn:
+        rows = conn.execute(f"PRAGMA table_info({table_name});").fetchall()
+    return [row[1] for row in rows]
+
+
+def build_merge_sql(table_name: str, key_column: str, columns: list[str]) -> str:
+    # Generate a conservative merge: update only changed rows, insert new, delete removed.
+    staging_table = f"staging_{table_name}"
+    staging_dedup = f"{staging_table}_dedup"
+    non_key_columns = [column for column in columns if column != key_column]
+
+    dedupe_sql = f"""-- Dedupe staging rows by key (keep first rowid)
+DROP TABLE IF EXISTS {staging_dedup};
+CREATE TABLE {staging_dedup} AS
+SELECT s.*
+FROM {staging_table} AS s
+WHERE s.rowid = (
+  SELECT MIN(rowid)
+  FROM {staging_table} AS s2
+  WHERE s2.{key_column} = s.{key_column}
+);
+DROP TABLE {staging_table};
+ALTER TABLE {staging_dedup} RENAME TO {staging_table};
+"""
+
+    update_sql = ""
+    if non_key_columns:
+        update_assignments = ",\n    ".join(
+            f"{column} = (SELECT {column} FROM {staging_table} "
+            f"WHERE {staging_table}.{key_column} = {table_name}.{key_column})"
+            for column in non_key_columns
+        )
+        diff_predicates = " OR\n      ".join(
+            f"{table_name}.{column} IS NOT (SELECT {column} FROM {staging_table} "
+            f"WHERE {staging_table}.{key_column} = {table_name}.{key_column})"
+            for column in non_key_columns
+        )
+        update_sql = f"""-- Merge changed rows
+UPDATE {table_name}
+SET {update_assignments}
+WHERE EXISTS (
+  SELECT 1
+  FROM {staging_table}
+  WHERE {staging_table}.{key_column} = {table_name}.{key_column}
+    AND (
+      {diff_predicates}
+    )
+);
+"""
+
+    warning_sql = (
+        f"-- Warn if staging is empty to avoid destructive deletes\n"
+        f"SELECT '{LOG_PREFIX}: WARNING empty staging for {table_name}, skipping deletes'\n"
+        f"WHERE (SELECT COUNT(*) FROM {staging_table}) = 0;\n"
+    )
+
+    delete_sql = f"""-- Delete removed rows (guarded on non-empty staging)
+DELETE FROM {table_name}
+WHERE (SELECT COUNT(*) FROM {staging_table}) > 0
+  AND {key_column} NOT IN (SELECT {key_column} FROM {staging_table});
+"""
+
+    return f"""{dedupe_sql}{update_sql}-- Insert new rows
+INSERT INTO {table_name}
+SELECT * FROM {staging_table}
+WHERE {key_column} NOT IN (SELECT {key_column} FROM {table_name});
+
+{warning_sql}{delete_sql}
+"""
+
 
 def check_prerequisites() -> None:
     """Verify required tools and credentials are available."""
@@ -47,21 +128,21 @@ def check_prerequisites() -> None:
         missing.append("R2_BUCKET")
 
     if missing:
-        print(f"Error: Missing environment variables: {', '.join(missing)}")
-        print("Add them to .env file")
+        log(f"Error: Missing environment variables: {', '.join(missing)}")
+        log("Add them to .env file")
         sys.exit(1)
 
     # Check sqlite3 is available
     try:
         subprocess.run(["sqlite3", "--version"], capture_output=True, check=True)
     except (subprocess.CalledProcessError, FileNotFoundError):
-        print("Error: sqlite3 command not found")
+        log("Error: sqlite3 command not found")
         sys.exit(1)
 
 
 def download_parquet_to_sqlite() -> None:
     """Download Parquet files from R2 and create SQLite database."""
-    print("\n[1/3] Downloading Parquet from R2 → SQLite")
+    log("\n[1/3] Downloading Parquet from R2 → SQLite")
 
     if SQLITE_FILE.exists():
         SQLITE_FILE.unlink()
@@ -92,7 +173,7 @@ def download_parquet_to_sqlite() -> None:
 
     # Copy each table
     for name, path in tables.items():
-        print(f"  Copying {name}...", end=" ", flush=True)
+        log(f"  Copying {name}...", end=" ", flush=True)
 
         if name == "groups":
             # Convert boolean to integer for SQLite
@@ -106,17 +187,17 @@ def download_parquet_to_sqlite() -> None:
             conn.execute(f"CREATE TABLE {name} AS SELECT * FROM '{path}'")
 
         count = conn.execute(f"SELECT COUNT(*) FROM {name}").fetchone()[0]
-        print(f"{count:,} rows")
+        log(f"{count:,} rows")
 
     # Create indexes
-    print("  Creating indexes...", end=" ", flush=True)
+    log("  Creating indexes...", end=" ", flush=True)
     conn.execute("CREATE INDEX idx_groups_abbr ON groups(abbr)")
     conn.execute("CREATE INDEX idx_products_lookup ON products(group_id, collector_number)")
     conn.execute("CREATE INDEX idx_skus_lookup ON skus(product_id, printing_id, condition_id, language_id)")
-    print("done")
+    log("done")
 
     conn.close()
-    print(f"  Output: {SQLITE_FILE} ({SQLITE_FILE.stat().st_size / 1024 / 1024:.1f} MB)")
+    log(f"  Output: {SQLITE_FILE} ({SQLITE_FILE.stat().st_size / 1024 / 1024:.1f} MB)")
 
 
 def create_sql_dumps() -> list[Path]:
@@ -124,51 +205,78 @@ def create_sql_dumps() -> list[Path]:
 
     Returns list of dump files in import order.
     """
-    print("\n[2/3] Creating SQL dump files")
+    log("\n[2/3] Creating SQL dump files")
 
     dump_files = []
+    table_keys = {
+        "groups": "group_id",
+        "products": "product_id",
+        "skus": "sku_id",
+    }
 
-    # 1. Schema dump (includes indexes)
+    # 1. Schema dump (includes indexes) with safe CREATE IF NOT EXISTS.
     schema_file = DUMP_DIR / "dump_schema.sql"
-    print("  Dumping schema...", end=" ", flush=True)
+    log("  Dumping schema...", end=" ", flush=True)
     schema = subprocess.run(
         ["sqlite3", str(SQLITE_FILE), ".schema"],
         capture_output=True,
         text=True,
         check=True,
     )
-    schema_file.write_text(schema.stdout)
-    print("done")
+    schema_lines = []
+    for line in schema.stdout.splitlines():
+        if line.startswith("CREATE TABLE "):
+            schema_lines.append(line.replace("CREATE TABLE ", "CREATE TABLE IF NOT EXISTS ", 1))
+        elif line.startswith("CREATE UNIQUE INDEX "):
+            schema_lines.append(line.replace("CREATE UNIQUE INDEX ", "CREATE UNIQUE INDEX IF NOT EXISTS ", 1))
+        elif line.startswith("CREATE INDEX "):
+            schema_lines.append(line.replace("CREATE INDEX ", "CREATE INDEX IF NOT EXISTS ", 1))
+        else:
+            schema_lines.append(line)
+    schema_file.write_text("\n".join(schema_lines) + "\n")
+    log("done")
     dump_files.append(schema_file)
 
+    def write_incremental_dump(table_name: str) -> Path:
+        # Write a single-file incremental sync for smaller tables.
+        key_column = table_keys[table_name]
+        staging_table = f"staging_{table_name}"
+        columns = get_table_columns(SQLITE_FILE, table_name)
+        log(f"  Dumping {table_name}...", end=" ", flush=True)
+        insert_result = subprocess.run(
+            ["sqlite3", str(SQLITE_FILE), "-cmd", f".mode insert {staging_table}", f"SELECT * FROM {table_name};"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        merge_sql = build_merge_sql(table_name, key_column, columns)
+        dump_content = "\n".join(
+            [
+                f"-- Incremental sync for {table_name}",
+                "PRAGMA foreign_keys=OFF;",
+                "BEGIN;",
+                f"DROP TABLE IF EXISTS {staging_table};",
+                f"CREATE TABLE {staging_table} AS SELECT * FROM {table_name} WHERE 0;",
+                insert_result.stdout.strip(),
+                merge_sql.strip(),
+                f"DROP TABLE IF EXISTS {staging_table};",
+                "COMMIT;",
+                "",
+            ]
+        )
+        dump_path = DUMP_DIR / f"dump_{table_name}.sql"
+        dump_path.write_text(dump_content)
+        log("done")
+        return dump_path
+
     # 2. Groups dump (small table)
-    groups_file = DUMP_DIR / "dump_groups.sql"
-    print("  Dumping groups...", end=" ", flush=True)
-    result = subprocess.run(
-        ["sqlite3", str(SQLITE_FILE), "-cmd", ".mode insert groups", "SELECT * FROM groups;"],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    groups_file.write_text(result.stdout)
-    print("done")
-    dump_files.append(groups_file)
+    dump_files.append(write_incremental_dump("groups"))
 
     # 3. Products dump (medium table)
-    products_file = DUMP_DIR / "dump_products.sql"
-    print("  Dumping products...", end=" ", flush=True)
-    result = subprocess.run(
-        ["sqlite3", str(SQLITE_FILE), "-cmd", ".mode insert products", "SELECT * FROM products;"],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    products_file.write_text(result.stdout)
-    print("done")
-    dump_files.append(products_file)
+    dump_files.append(write_incremental_dump("products"))
 
     # 4. SKUs dump - split into chunks to avoid D1 reset
-    print("  Counting SKUs...", end=" ", flush=True)
+    log("  Counting SKUs...", end=" ", flush=True)
     count_result = subprocess.run(
         ["sqlite3", str(SQLITE_FILE), "SELECT COUNT(*) FROM skus;"],
         capture_output=True,
@@ -176,44 +284,87 @@ def create_sql_dumps() -> list[Path]:
         check=True,
     )
     sku_count = int(count_result.stdout.strip())
-    print(f"{sku_count:,} rows")
+    log(f"{sku_count:,} rows")
 
     num_chunks = (sku_count + SKU_CHUNK_SIZE - 1) // SKU_CHUNK_SIZE
-    print(f"  Splitting SKUs into {num_chunks} chunks of ~{SKU_CHUNK_SIZE:,} rows each")
+    log(f"  Splitting SKUs into {num_chunks} chunks of ~{SKU_CHUNK_SIZE:,} rows each")
+
+    sku_columns = get_table_columns(SQLITE_FILE, "skus")
+    sku_staging_table = "staging_skus"
+
+    # Create the staging table once before chunked inserts.
+    skus_setup_file = DUMP_DIR / "dump_skus_setup.sql"
+    skus_setup_file.write_text(
+        "\n".join(
+            [
+                "-- Prepare staging table for SKUs",
+                "PRAGMA foreign_keys=OFF;",
+                f"DROP TABLE IF EXISTS {sku_staging_table};",
+                f"CREATE TABLE {sku_staging_table} AS SELECT * FROM skus WHERE 0;",
+                "",
+            ]
+        )
+    )
+    dump_files.append(skus_setup_file)
 
     for i, offset in enumerate(range(0, sku_count, SKU_CHUNK_SIZE)):
         chunk_file = DUMP_DIR / f"dump_skus_{i}.sql"
-        print(f"  Dumping skus chunk {i} (offset {offset:,})...", end=" ", flush=True)
+        log(f"  Dumping skus chunk {i} (offset {offset:,})...", end=" ", flush=True)
         result = subprocess.run(
             [
                 "sqlite3", str(SQLITE_FILE),
-                "-cmd", ".mode insert skus",
+                "-cmd", f".mode insert {sku_staging_table}",
                 f"SELECT * FROM skus LIMIT {SKU_CHUNK_SIZE} OFFSET {offset};"
             ],
             capture_output=True,
             text=True,
             check=True,
         )
-        chunk_file.write_text(result.stdout)
-        print("done")
+        chunk_content = "\n".join(
+            [
+                f"-- Insert SKU chunk {i} into staging",
+                "BEGIN;",
+                result.stdout.strip(),
+                "COMMIT;",
+                "",
+            ]
+        )
+        chunk_file.write_text(chunk_content)
+        log("done")
         dump_files.append(chunk_file)
+
+    # Merge staging SKUs into the main table after all chunks are loaded.
+    skus_merge_file = DUMP_DIR / "dump_skus_merge.sql"
+    skus_merge_file.write_text(
+        "\n".join(
+            [
+                "-- Merge staging SKUs into main table",
+                "BEGIN;",
+                build_merge_sql("skus", table_keys["skus"], sku_columns).strip(),
+                f"DROP TABLE IF EXISTS {sku_staging_table};",
+                "COMMIT;",
+                "",
+            ]
+        )
+    )
+    dump_files.append(skus_merge_file)
 
     # Print summary
     total_size = sum(f.stat().st_size for f in dump_files) / 1024 / 1024
-    print(f"  Output: {len(dump_files)} files totaling {total_size:.1f} MB")
+    log(f"  Output: {len(dump_files)} files totaling {total_size:.1f} MB")
     for f in dump_files:
-        print(f"    - {f.name} ({f.stat().st_size / 1024 / 1024:.1f} MB)")
+        log(f"    - {f.name} ({f.stat().st_size / 1024 / 1024:.1f} MB)")
 
     return dump_files
 
 
 def import_to_d1(database: str, working_dir: Path, dump_files: list[Path]) -> None:
     """Import SQL dump files to Cloudflare D1 sequentially."""
-    print(f"\n[3/3] Importing to D1 ({database})")
+    log(f"\n[3/3] Importing to D1 ({database})")
 
     for i, dump_file in enumerate(dump_files):
         dump_path = dump_file.resolve()
-        print(f"  [{i+1}/{len(dump_files)}] Importing {dump_file.name}...", end=" ", flush=True)
+        log(f"  [{i+1}/{len(dump_files)}] Importing {dump_file.name}...", end=" ", flush=True)
 
         result = subprocess.run(
             ["npx", "wrangler", "d1", "execute", database, "--remote", f"--file={dump_path}"],
@@ -223,14 +374,14 @@ def import_to_d1(database: str, working_dir: Path, dump_files: list[Path]) -> No
         )
 
         if result.returncode != 0:
-            print("FAILED")
-            print(f"  Error: {result.stderr}")
-            print(f"  Stdout: {result.stdout}")
+            log("FAILED")
+            log(f"  Error: {result.stderr}")
+            log(f"  Stdout: {result.stdout}")
             sys.exit(1)
 
-        print("done")
+        log("done")
 
-    print("  All imports complete!")
+    log("  All imports complete!")
 
 
 def main():
@@ -244,18 +395,18 @@ def main():
     parser.add_argument("--working-dir", type=Path, default=Path(__file__).parent / "worker")
     args = parser.parse_args()
 
-    print("=" * 60)
-    print("TCG Matcher: R2 Parquet → D1 Sync")
-    print("=" * 60)
+    log("=" * 60)
+    log("TCG Matcher: R2 Parquet → D1 Sync")
+    log("=" * 60)
 
     check_prerequisites()
 
     # Step 1: Download Parquet to SQLite
     if args.skip_download:
         if not SQLITE_FILE.exists():
-            print(f"Error: --skip-download specified but {SQLITE_FILE} not found")
+            log(f"Error: --skip-download specified but {SQLITE_FILE} not found")
             sys.exit(1)
-        print(f"\n[1/3] Skipping download, using existing {SQLITE_FILE}")
+        log(f"\n[1/3] Skipping download, using existing {SQLITE_FILE}")
     else:
         download_parquet_to_sqlite()
 
@@ -264,17 +415,17 @@ def main():
 
     # Step 3: Import to D1
     if args.skip_import:
-        print("\n[3/3] Skipping D1 import (--skip-import)")
-        print("  To import manually, run these commands in order:")
-        print(f"    cd {args.working_dir}")
+        log("\n[3/3] Skipping D1 import (--skip-import)")
+        log("  To import manually, run these commands in order:")
+        log(f"    cd {args.working_dir}")
         for dump_file in dump_files:
-            print(f"    npx wrangler d1 execute {args.database} --remote --file={dump_file.resolve()}")
+            log(f"    npx wrangler d1 execute {args.database} --remote --file={dump_file.resolve()}")
     else:
         import_to_d1(args.database, args.working_dir, dump_files)
 
-    print("\n" + "=" * 60)
-    print("Sync complete!")
-    print("=" * 60)
+    log("\n" + "=" * 60)
+    log("Sync complete!")
+    log("=" * 60)
 
 
 if __name__ == "__main__":
