@@ -266,17 +266,15 @@ def create_sql_dumps() -> list[Path]:
             check=True,
         )
         merge_sql = build_merge_sql(table_name, key_column, columns)
+        # D1 doesn't support BEGIN/COMMIT or PRAGMA in SQL; omit them.
         dump_content = "\n".join(
             [
                 f"-- Incremental sync for {table_name}",
-                "PRAGMA foreign_keys=OFF;",
-                "BEGIN;",
                 f"DROP TABLE IF EXISTS {staging_table};",
                 f"CREATE TABLE {staging_table} AS SELECT * FROM {table_name} WHERE 0;",
                 insert_result.stdout.strip(),
                 merge_sql.strip(),
                 f"DROP TABLE IF EXISTS {staging_table};",
-                "COMMIT;",
                 "",
             ]
         )
@@ -314,7 +312,6 @@ def create_sql_dumps() -> list[Path]:
         "\n".join(
             [
                 "-- Prepare staging table for SKUs",
-                "PRAGMA foreign_keys=OFF;",
                 f"DROP TABLE IF EXISTS {sku_staging_table};",
                 f"CREATE TABLE {sku_staging_table} AS SELECT * FROM skus WHERE 0;",
                 "",
@@ -339,9 +336,7 @@ def create_sql_dumps() -> list[Path]:
         chunk_content = "\n".join(
             [
                 f"-- Insert SKU chunk {i} into staging",
-                "BEGIN;",
                 result.stdout.strip(),
-                "COMMIT;",
                 "",
             ]
         )
@@ -355,10 +350,8 @@ def create_sql_dumps() -> list[Path]:
         "\n".join(
             [
                 "-- Merge staging SKUs into main table",
-                "BEGIN;",
                 build_merge_sql("skus", table_keys["skus"], sku_columns).strip(),
                 f"DROP TABLE IF EXISTS {sku_staging_table};",
-                "COMMIT;",
                 "",
             ]
         )
