@@ -1,5 +1,6 @@
 // Input CSV row (from ManaBox or similar)
 export interface InputRow {
+  Name?: string;
   'Set code': string;
   'Collector number': string;
   Foil: string;
@@ -7,6 +8,28 @@ export interface InputRow {
   Language?: string;
   Quantity: string;
   'Purchase price'?: string;
+}
+
+// Normalized card data for matching (source-agnostic)
+export interface NormalizedCard {
+  name: string;
+  setCode: string;           // TCGPlayer set code (e.g., "OTJ", "LIST")
+  collectorNumber: string;   // Normalized collector number
+  isToken: boolean;          // True if this is a token
+  isFoil: boolean;           // True if foil/rainbow foil
+  condition: string;
+  language: string;
+  quantity: number;
+  purchasePrice?: string;
+  // Original values for debugging
+  originalSetCode: string;
+  originalCollectorNumber: string;
+}
+
+// Hints for selecting the right product when multiple match
+export interface ProductLookupHints {
+  isToken: boolean;
+  isFoil: boolean;
 }
 
 // Output CSV row (TCGPlayer format)
@@ -106,3 +129,30 @@ export const CONDITION_NAMES: Record<number, string> = {
   4: 'Heavily Played',
   5: 'Damaged',
 };
+
+// Set code overrides for ManaBox → TCGPlayer mapping
+export const SET_CODE_MAP: Record<string, string> = {
+  PLST: 'LIST',
+  // Add more overrides as needed
+};
+
+/**
+ * Normalize a set code for TCGPlayer lookup
+ * - Applies explicit overrides from SET_CODE_MAP
+ * - Strips "T" prefix from 4-letter token codes (TBLC → BLC)
+ */
+export function normalizeSetCode(code: string): string {
+  const upper = code.toUpperCase();
+
+  // Check explicit overrides first
+  if (SET_CODE_MAP[upper]) {
+    return SET_CODE_MAP[upper];
+  }
+
+  // Handle token codes: 4 letters starting with T → strip the T
+  if (upper.length === 4 && upper.startsWith('T')) {
+    return upper.slice(1);
+  }
+
+  return upper;
+}

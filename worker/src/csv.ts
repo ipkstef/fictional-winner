@@ -45,3 +45,11 @@ export function toCSV(rows: OutputRow[]): string {
     quotes: true,
   });
 }
+
+/**
+ * Convert any array of objects to CSV string using Papa Parse
+ */
+export function toGenericCSV<T extends object>(rows: T[]): string {
+  if (rows.length === 0) return '';
+  return Papa.unparse(rows, { quotes: true });
+}
