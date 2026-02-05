@@ -12,8 +12,6 @@ Usage:
 
 import argparse
 import os
-import re
-import sqlite3
 import subprocess
 import sys
 from pathlib import Path
@@ -34,7 +32,6 @@ SQLITE_FILE = Path("tcg_data.db")
 DUMP_DIR = Path(".")  # Directory for dump files
 SKU_CHUNK_SIZE = 500_000  # Split SKUs into chunks to avoid D1 reset
 PRODUCTS_CHUNK_SIZE = 50_000  # Split products into chunks to avoid D1 CPU limits
-MERGE_CHUNK_SIZE = 10_000  # Split merge operations to stay under D1 query time limits
 
 LOG_PREFIX = Path(__file__).name
 
@@ -42,122 +39,6 @@ LOG_PREFIX = Path(__file__).name
 def log(message: str = "", **kwargs) -> None:
     # Centralize logs so every message includes a file origin prefix.
     print(f"{LOG_PREFIX}: {message}", **kwargs)
-
-
-def get_table_columns(sqlite_file: Path, table_name: str) -> list[str]:
-    # Read column order from SQLite so incremental merges stay schema-aligned.
-    with sqlite3.connect(sqlite_file) as conn:
-        rows = conn.execute(f"PRAGMA table_info({table_name});").fetchall()
-    return [row[1] for row in rows]
-
-
-def get_table_key_ranges(sqlite_file: Path, table_name: str, key_column: str, chunk_size: int) -> list[tuple[int, int]]:
-    # Build key ranges for chunked merges to avoid long-running D1 statements.
-    with sqlite3.connect(sqlite_file) as conn:
-        min_max = conn.execute(
-            f"SELECT MIN({key_column}), MAX({key_column}) FROM {table_name};"
-        ).fetchone()
-    if not min_max or min_max[0] is None or min_max[1] is None:
-        return []
-
-    min_key, max_key = int(min_max[0]), int(min_max[1])
-    ranges = []
-    start = min_key
-    while start <= max_key:
-        end = min(start + chunk_size - 1, max_key)
-        ranges.append((start, end))
-        start = end + 1
-    return ranges
-
-
-def build_merge_sql(
-    table_name: str,
-    key_column: str,
-    columns: list[str],
-    key_ranges: list[tuple[int, int]] | None = None,
-) -> str:
-    # Generate a conservative merge: update only changed rows, insert new, delete removed.
-    staging_table = f"staging_{table_name}"
-    staging_dedup = f"{staging_table}_dedup"
-    non_key_columns = [column for column in columns if column != key_column]
-
-    dedupe_sql = f"""-- Dedupe staging rows by key (keep first rowid)
-DROP TABLE IF EXISTS {staging_dedup};
-CREATE TABLE {staging_dedup} AS
-SELECT s.*
-FROM {staging_table} AS s
-WHERE s.rowid = (
-  SELECT MIN(rowid)
-  FROM {staging_table} AS s2
-  WHERE s2.{key_column} = s.{key_column}
-);
-DROP TABLE {staging_table};
-ALTER TABLE {staging_dedup} RENAME TO {staging_table};
-"""
-
-    update_sql = ""
-    if non_key_columns:
-        update_assignments = ",\n    ".join(
-            f"{column} = (SELECT {column} FROM {staging_table} "
-            f"WHERE {staging_table}.{key_column} = {table_name}.{key_column})"
-            for column in non_key_columns
-        )
-        diff_predicates = " OR\n      ".join(
-            f"{table_name}.{column} IS NOT (SELECT {column} FROM {staging_table} "
-            f"WHERE {staging_table}.{key_column} = {table_name}.{key_column})"
-            for column in non_key_columns
-        )
-        update_sql = f"""-- Merge changed rows
-UPDATE {table_name}
-SET {update_assignments}
-WHERE EXISTS (
-  SELECT 1
-  FROM {staging_table}
-  WHERE {staging_table}.{key_column} = {table_name}.{key_column}
-    AND (
-      {diff_predicates}
-    )
-);
-"""
-
-    warning_sql = (
-        f"-- Warn if staging is empty to avoid destructive deletes\n"
-        f"SELECT '{LOG_PREFIX}: WARNING empty staging for {table_name}, skipping deletes'\n"
-        f"WHERE (SELECT COUNT(*) FROM {staging_table}) = 0;\n"
-    )
-
-    # Chunk large merges to stay under D1 query duration limits.
-    ranges = key_ranges or []
-    if not ranges:
-        ranges = [(None, None)]
-
-    chunked_merge_parts = []
-    for start, end in ranges:
-        range_predicate = ""
-        if start is not None and end is not None:
-            range_predicate = f"AND {table_name}.{key_column} BETWEEN {start} AND {end}"
-        update_chunk_sql = update_sql
-        if update_chunk_sql:
-            update_chunk_sql = update_chunk_sql.replace(");", f"  {range_predicate}\n);\n")
-
-        insert_range_predicate = ""
-        if start is not None and end is not None:
-            insert_range_predicate = f"AND {key_column} BETWEEN {start} AND {end}"
-        insert_sql = f"""-- Insert new rows
-INSERT INTO {table_name}
-SELECT * FROM {staging_table}
-WHERE {key_column} NOT IN (SELECT {key_column} FROM {table_name})
-  {insert_range_predicate};
-"""
-        delete_sql = f"""-- Delete removed rows (guarded on non-empty staging)
-DELETE FROM {table_name}
-WHERE (SELECT COUNT(*) FROM {staging_table}) > 0
-  AND {key_column} NOT IN (SELECT {key_column} FROM {staging_table})
-  {insert_range_predicate};
-"""
-        chunked_merge_parts.append(f"{update_chunk_sql}{insert_sql}{warning_sql}{delete_sql}")
-
-    return f"""{dedupe_sql}{''.join(chunked_merge_parts)}"""
 
 
 def check_prerequisites() -> None:
@@ -254,11 +135,6 @@ def create_sql_dumps() -> list[Path]:
     log("\n[2/3] Creating SQL dump files")
 
     dump_files = []
-    table_keys = {
-        "groups": "group_id",
-        "products": "product_id",
-        "skus": "sku_id",
-    }
 
     # 1. Schema dump (includes indexes) with safe DROP/CREATE for D1 compatibility.
     schema_file = DUMP_DIR / "dump_schema.sql"
@@ -298,41 +174,24 @@ def create_sql_dumps() -> list[Path]:
     log("done")
     dump_files.append(schema_file)
 
-    def write_incremental_dump(table_name: str) -> Path:
-        # Write a single-file incremental sync for smaller tables.
-        key_column = table_keys[table_name]
-        staging_table = f"staging_{table_name}"
-        columns = get_table_columns(SQLITE_FILE, table_name)
+    def write_full_dump(table_name: str) -> Path:
+        # Write a full refresh dump for small tables.
         log(f"  Dumping {table_name}...", end=" ", flush=True)
-        insert_result = subprocess.run(
-            ["sqlite3", str(SQLITE_FILE), "-cmd", f".mode insert {staging_table}", f"SELECT * FROM {table_name};"],
+        result = subprocess.run(
+            ["sqlite3", str(SQLITE_FILE), "-cmd", f".mode insert {table_name}", f"SELECT * FROM {table_name};"],
             capture_output=True,
             text=True,
             check=True,
         )
-        key_ranges = get_table_key_ranges(SQLITE_FILE, table_name, key_column, MERGE_CHUNK_SIZE)
-        merge_sql = build_merge_sql(table_name, key_column, columns, key_ranges)
-        # D1 doesn't support BEGIN/COMMIT or PRAGMA in SQL; omit them.
-        dump_content = "\n".join(
-            [
-                f"-- Incremental sync for {table_name}",
-                f"DROP TABLE IF EXISTS {staging_table};",
-                f"CREATE TABLE {staging_table} AS SELECT * FROM {table_name} WHERE 0;",
-                insert_result.stdout.strip(),
-                merge_sql.strip(),
-                f"DROP TABLE IF EXISTS {staging_table};",
-                "",
-            ]
-        )
         dump_path = DUMP_DIR / f"dump_{table_name}.sql"
-        dump_path.write_text(dump_content)
+        dump_path.write_text("\n".join([f"-- Full refresh for {table_name}", result.stdout.strip(), ""]))
         log("done")
         return dump_path
 
     # 2. Groups dump (small table)
-    dump_files.append(write_incremental_dump("groups"))
+    dump_files.append(write_full_dump("groups"))
 
-    # 3. Products dump - chunked to avoid D1 CPU limit during merges.
+    # 3. Products dump - chunked to avoid D1 CPU limit.
     log("  Counting products...", end=" ", flush=True)
     products_count_result = subprocess.run(
         ["sqlite3", str(SQLITE_FILE), "SELECT COUNT(*) FROM products;"],
@@ -346,31 +205,13 @@ def create_sql_dumps() -> list[Path]:
     products_chunks = (products_count + PRODUCTS_CHUNK_SIZE - 1) // PRODUCTS_CHUNK_SIZE
     log(f"  Splitting products into {products_chunks} chunks of ~{PRODUCTS_CHUNK_SIZE:,} rows each")
 
-    products_columns = get_table_columns(SQLITE_FILE, "products")
-    products_key_ranges = get_table_key_ranges(SQLITE_FILE, "products", table_keys["products"], MERGE_CHUNK_SIZE)
-    products_staging_table = "staging_products"
-
-    # Create the products staging table once before chunked inserts.
-    products_setup_file = DUMP_DIR / "dump_products_setup.sql"
-    products_setup_file.write_text(
-        "\n".join(
-            [
-                "-- Prepare staging table for products",
-                f"DROP TABLE IF EXISTS {products_staging_table};",
-                f"CREATE TABLE {products_staging_table} AS SELECT * FROM products WHERE 0;",
-                "",
-            ]
-        )
-    )
-    dump_files.append(products_setup_file)
-
     for i, offset in enumerate(range(0, products_count, PRODUCTS_CHUNK_SIZE)):
         chunk_file = DUMP_DIR / f"dump_products_{i}.sql"
         log(f"  Dumping products chunk {i} (offset {offset:,})...", end=" ", flush=True)
         result = subprocess.run(
             [
                 "sqlite3", str(SQLITE_FILE),
-                "-cmd", f".mode insert {products_staging_table}",
+                "-cmd", ".mode insert products",
                 f"SELECT * FROM products LIMIT {PRODUCTS_CHUNK_SIZE} OFFSET {offset};"
             ],
             capture_output=True,
@@ -379,7 +220,7 @@ def create_sql_dumps() -> list[Path]:
         )
         chunk_content = "\n".join(
             [
-                f"-- Insert products chunk {i} into staging",
+                f"-- Insert products chunk {i}",
                 result.stdout.strip(),
                 "",
             ]
@@ -387,20 +228,6 @@ def create_sql_dumps() -> list[Path]:
         chunk_file.write_text(chunk_content)
         log("done")
         dump_files.append(chunk_file)
-
-    # Merge staging products into the main table after all chunks are loaded.
-    products_merge_file = DUMP_DIR / "dump_products_merge.sql"
-    products_merge_file.write_text(
-        "\n".join(
-            [
-                "-- Merge staging products into main table",
-                build_merge_sql("products", table_keys["products"], products_columns, products_key_ranges).strip(),
-                f"DROP TABLE IF EXISTS {products_staging_table};",
-                "",
-            ]
-        )
-    )
-    dump_files.append(products_merge_file)
 
     # 4. SKUs dump - split into chunks to avoid D1 reset
     log("  Counting SKUs...", end=" ", flush=True)
@@ -416,31 +243,13 @@ def create_sql_dumps() -> list[Path]:
     num_chunks = (sku_count + SKU_CHUNK_SIZE - 1) // SKU_CHUNK_SIZE
     log(f"  Splitting SKUs into {num_chunks} chunks of ~{SKU_CHUNK_SIZE:,} rows each")
 
-    sku_columns = get_table_columns(SQLITE_FILE, "skus")
-    sku_key_ranges = get_table_key_ranges(SQLITE_FILE, "skus", table_keys["skus"], MERGE_CHUNK_SIZE)
-    sku_staging_table = "staging_skus"
-
-    # Create the staging table once before chunked inserts.
-    skus_setup_file = DUMP_DIR / "dump_skus_setup.sql"
-    skus_setup_file.write_text(
-        "\n".join(
-            [
-                "-- Prepare staging table for SKUs",
-                f"DROP TABLE IF EXISTS {sku_staging_table};",
-                f"CREATE TABLE {sku_staging_table} AS SELECT * FROM skus WHERE 0;",
-                "",
-            ]
-        )
-    )
-    dump_files.append(skus_setup_file)
-
     for i, offset in enumerate(range(0, sku_count, SKU_CHUNK_SIZE)):
         chunk_file = DUMP_DIR / f"dump_skus_{i}.sql"
         log(f"  Dumping skus chunk {i} (offset {offset:,})...", end=" ", flush=True)
         result = subprocess.run(
             [
                 "sqlite3", str(SQLITE_FILE),
-                "-cmd", f".mode insert {sku_staging_table}",
+                "-cmd", ".mode insert skus",
                 f"SELECT * FROM skus LIMIT {SKU_CHUNK_SIZE} OFFSET {offset};"
             ],
             capture_output=True,
@@ -449,7 +258,7 @@ def create_sql_dumps() -> list[Path]:
         )
         chunk_content = "\n".join(
             [
-                f"-- Insert SKU chunk {i} into staging",
+                f"-- Insert SKU chunk {i}",
                 result.stdout.strip(),
                 "",
             ]
@@ -457,20 +266,6 @@ def create_sql_dumps() -> list[Path]:
         chunk_file.write_text(chunk_content)
         log("done")
         dump_files.append(chunk_file)
-
-    # Merge staging SKUs into the main table after all chunks are loaded.
-    skus_merge_file = DUMP_DIR / "dump_skus_merge.sql"
-    skus_merge_file.write_text(
-        "\n".join(
-            [
-                "-- Merge staging SKUs into main table",
-                build_merge_sql("skus", table_keys["skus"], sku_columns, sku_key_ranges).strip(),
-                f"DROP TABLE IF EXISTS {sku_staging_table};",
-                "",
-            ]
-        )
-    )
-    dump_files.append(skus_merge_file)
 
     # Print summary
     total_size = sum(f.stat().st_size for f in dump_files) / 1024 / 1024
