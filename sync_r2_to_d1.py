@@ -227,16 +227,17 @@ def create_sql_dumps() -> list[Path]:
     for line in schema.stdout.splitlines():
         if line.startswith("CREATE TABLE "):
             # Keep SQLite-compatible DDL while avoiding "table already exists" errors.
-            table_name = line.split()[2]
+            # Strip trailing "(" in case schema is "CREATE TABLE foo(" without space.
+            table_name = line.split()[2].rstrip("(")
             schema_lines.append(f"DROP TABLE IF EXISTS {table_name};")
             schema_lines.append(line)
         elif line.startswith("CREATE UNIQUE INDEX "):
             # D1 can choke on IF NOT EXISTS here, so drop then create.
-            index_name = line.split()[3]
+            index_name = line.split()[3].rstrip("(")
             schema_lines.append(f"DROP INDEX IF EXISTS {index_name};")
             schema_lines.append(line)
         elif line.startswith("CREATE INDEX "):
-            index_name = line.split()[2]
+            index_name = line.split()[2].rstrip("(")
             schema_lines.append(f"DROP INDEX IF EXISTS {index_name};")
             schema_lines.append(line)
         else:
