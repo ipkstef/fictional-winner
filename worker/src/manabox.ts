@@ -1,4 +1,4 @@
-import { InputRow, NormalizedCard } from './types';
+import { InputRow, NormalizedCard, SET_CODE_MAP } from './types';
 
 /**
  * Parse ManaBox PLST collector number format
@@ -37,6 +37,11 @@ export function normalizeManaBoxRow(row: InputRow): NormalizedCard {
     setCode = rawSetCode.slice(1);
   }
 
+  // Apply set code overrides (PM21→PPM21, GVL→DDD, etc.)
+  if (SET_CODE_MAP[setCode]) {
+    setCode = SET_CODE_MAP[setCode];
+  }
+
   // Normalize collector number for PLST
   let collectorNumber = row['Collector number'] || '';
   if (isPLST) {
@@ -44,19 +49,6 @@ export function normalizeManaBoxRow(row: InputRow): NormalizedCard {
     if (parsed) {
       collectorNumber = parsed;
     }
-  }
-
-  // Strip trailing letter from UNF-style collector numbers: "221a" → "221"
-  // TCGPlayer uses base number with variant in product name, e.g., "Memory Test (3-6)"
-  if (/^\d+[a-z]$/i.test(collectorNumber)) {
-    collectorNumber = collectorNumber.slice(0, -1);
-  }
-
-  // ManaBox-specific set code overrides
-  if (setCode === 'SUNF') {
-    setCode = 'UNF';
-  } else if (setCode === 'JTLA') {
-    setCode = 'TLA';
   }
 
   // MB2 playtest cards (collector number >= 500) are in the MB2PC group

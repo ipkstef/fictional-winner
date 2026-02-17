@@ -133,26 +133,14 @@ export const CONDITION_NAMES: Record<number, string> = {
 // Set code overrides for ManaBox → TCGPlayer mapping
 export const SET_CODE_MAP: Record<string, string> = {
   PLST: 'LIST',
-  // Add more overrides as needed
+  SUNF: 'UNF',
+  JTLA: 'TLA',
+  PM21: 'PPM21',
+  PDSK: 'PPDSK',
+  GVL: 'DDD',
+  JVC: 'DD2',
+  DVD: 'DDC',
+  GK1: 'GR1',
 };
 
-/**
- * Normalize a set code for TCGPlayer lookup
- * - Applies explicit overrides from SET_CODE_MAP
- * - Strips "T" prefix from 4-letter token codes (TBLC → BLC)
- */
-export function normalizeSetCode(code: string): string {
-  const upper = code.toUpperCase();
 
-  // Check explicit overrides first
-  if (SET_CODE_MAP[upper]) {
-    return SET_CODE_MAP[upper];
-  }
-
-  // Handle token codes: 4 letters starting with T → strip the T
-  if (upper.length === 4 && upper.startsWith('T')) {
-    return upper.slice(1);
-  }
-
-  return upper;
-}

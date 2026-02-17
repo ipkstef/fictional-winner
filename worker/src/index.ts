@@ -28,6 +28,20 @@ function formatPrice(cents: number | null): string {
 }
 
 /**
+ * Normalize a card name to match TCGPlayer's clean_name format
+ * Strips diacritics, hyphens→spaces, removes apostrophes/punctuation
+ */
+function cleanName(name: string): string {
+  return name
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/-/g, ' ')
+    .replace(/[^a-zA-Z0-9\s]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
  * Detect special/supplemental product types that share collector numbers
  * with regular cards (Theme Cards, Minigames, Helper Cards, Emblems)
  */
@@ -38,7 +52,10 @@ function isSpecialProduct(name: string): boolean {
          name.startsWith('Emblem -') ||
          name.startsWith('Emblem:') ||
          name.includes('(Step-and-Compleat Foil)') ||
-         name.includes('(Concept Praetor)');
+         name.includes('(Concept Praetor)') ||
+         name.includes('(Surge Foil)') ||
+         name.includes('(Serial Numbered)') ||
+         name.includes('- Thick Stock');
 }
 
 /**
@@ -176,8 +193,8 @@ async function batchFetchProductsByName(
   const statements: D1PreparedStatement[] = [];
   for (let i = 0; i < keys.length; i += CHUNK_SIZE_PRODUCTS) {
     const chunk = keys.slice(i, i + CHUNK_SIZE_PRODUCTS);
-    const conditions = chunk.map(() => '(group_id = ? AND name = ?)').join(' OR ');
-    const params = chunk.flatMap((k) => [k.groupId, k.name]);
+    const conditions = chunk.map(() => '(group_id = ? AND clean_name = ?)').join(' OR ');
+    const params = chunk.flatMap((k) => [k.groupId, cleanName(k.name)]);
     statements.push(
       db.prepare(
         `SELECT product_id, group_id, name, clean_name, image_url, rarity_id, collector_number
@@ -192,13 +209,13 @@ async function batchFetchProductsByName(
   // Build a map of hints by name for product selection
   const hintsMap = new Map<string, ProductLookupHints>();
   for (const k of keys) {
-    hintsMap.set(`${k.groupId}:name:${k.name}`, k.hints);
+    hintsMap.set(`${k.groupId}:name:${cleanName(k.name)}`, k.hints);
   }
 
   const results = new Map<string, ProductRow>();
   for (const result of batchResults) {
     for (const p of result.results as ProductRow[]) {
-      const key = `${p.group_id}:name:${p.name}`;
+      const key = `${p.group_id}:name:${p.clean_name}`;
       const hints = hintsMap.get(key) || { isToken: false, isFoil: false };
       const existing = results.get(key);
       results.set(key, selectPreferredProduct(existing, p, hints));
@@ -333,7 +350,7 @@ async function processCSV(csvText: string, env: Env): Promise<{ csv: string; sta
   const productKeys: Array<{ groupId: number; collectorNumber: string; hints: ProductLookupHints }> = [];
   const listNameKeys: Array<{ groupId: number; name: string; hints: ProductLookupHints }> = [];
   const listPrefixKeys: Array<{ groupId: number; collectorPrefix: string; hints: ProductLookupHints }> = [];
-  const rowProductKeys: Array<{ primary: string | null; fallback: string | null }> = [];
+  const rowProductKeys: Array<{ primary: string | null; fallback: string | null; nameFallback?: string | null }> = [];
 
   for (const card of normalizedCards) {
     if (!card.setCode) {
@@ -355,7 +372,7 @@ async function processCSV(csvText: string, env: Env): Promise<{ csv: string; sta
                           card.originalSetCode === 'SUNF';
 
     if (useNameLookup) {
-      const nameKey = card.name ? `${group.group_id}:name:${card.name}` : null;
+      const nameKey = card.name ? `${group.group_id}:name:${cleanName(card.name)}` : null;
 
       if (card.name) {
         listNameKeys.push({ groupId: group.group_id, name: card.name, hints });
@@ -419,10 +436,46 @@ async function processCSV(csvText: string, env: Env): Promise<{ csv: string; sta
     productMap.set(key, value);
   }
 
-  // Helper to resolve product key (try primary, then fallback)
-  const resolveProductKey = (keys: { primary: string | null; fallback: string | null }): string | null => {
+  // Name-based fallback for rows where collector number lookup found nothing
+  // Handles sets like Ice Age where TCGPlayer products have NULL collector numbers
+  const nameFallbackKeys: Array<{ groupId: number; name: string; hints: ProductLookupHints }> = [];
+  for (let i = 0; i < normalizedCards.length; i++) {
+    const card = normalizedCards[i];
+    const keys = rowProductKeys[i];
+
+    // Skip if we already have a product match
+    if (keys.primary && productMap.has(keys.primary)) continue;
+    if (keys.fallback && productMap.has(keys.fallback)) continue;
+
+    // Skip rows without a valid group or name
+    if (!card.setCode || !card.name) continue;
+    const group = groupMap.get(card.setCode);
+    if (!group) continue;
+
+    // Skip sets that already use name-based lookup
+    const usesNameLookup = card.setCode === 'LIST' || card.setCode === 'MB2PC' || card.originalSetCode === 'SUNF';
+    if (usesNameLookup) continue;
+
+    const nameKey = `${group.group_id}:name:${cleanName(card.name)}`;
+    nameFallbackKeys.push({ groupId: group.group_id, name: card.name, hints: { isToken: card.isToken, isFoil: card.isFoil } });
+    rowProductKeys[i] = { primary: keys.primary, fallback: keys.fallback, nameFallback: nameKey };
+  }
+
+  if (nameFallbackKeys.length > 0) {
+    const uniqueFallbackKeys = Array.from(
+      new Map(nameFallbackKeys.map((k) => [`${k.groupId}:name:${k.name}`, k])).values()
+    );
+    const nameFallbackMap = await batchFetchProductsByName(env.DB, uniqueFallbackKeys);
+    for (const [key, value] of nameFallbackMap) {
+      productMap.set(key, value);
+    }
+  }
+
+  // Helper to resolve product key (try primary, then fallback, then name fallback)
+  const resolveProductKey = (keys: { primary: string | null; fallback: string | null; nameFallback?: string | null }): string | null => {
     if (keys.primary && productMap.has(keys.primary)) return keys.primary;
     if (keys.fallback && productMap.has(keys.fallback)) return keys.fallback;
+    if (keys.nameFallback && productMap.has(keys.nameFallback)) return keys.nameFallback;
     return keys.primary || keys.fallback; // Return for error messages
   };
 
