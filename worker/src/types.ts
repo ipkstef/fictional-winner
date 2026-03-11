@@ -133,6 +133,7 @@ export const CONDITION_NAMES: Record<number, string> = {
 // Set code overrides for ManaBox → TCGPlayer mapping
 export const SET_CODE_MAP: Record<string, string> = {
   PLST: 'LIST',
+  ULST: 'LIST',
   SUNF: 'UNF',
   JTLA: 'TLA',
   PM21: 'PPM21',
@@ -142,5 +143,4 @@ export const SET_CODE_MAP: Record<string, string> = {
   DVD: 'DDC',
   GK1: 'GR1',
 };
-
 

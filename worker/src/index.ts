@@ -97,6 +97,7 @@ function selectPreferredProduct(
 const CHUNK_SIZE_GROUPS = 100;  // 1 param per item
 const CHUNK_SIZE_PRODUCTS = 50; // 2 params per item
 const CHUNK_SIZE_SKUS = 25;     // 4 params per item
+const CHUNK_SIZE_PRODUCT_PREFIX = 33; // 3 params per item
 
 /**
  * Batch fetch groups by set code abbreviations
@@ -105,7 +106,7 @@ const CHUNK_SIZE_SKUS = 25;     // 4 params per item
 async function batchFetchGroups(
   db: D1Database,
   setCodes: string[]
-): Promise<Map<string, GroupRow>> {
+): Promise<Map<string, GroupRow[]>> {
   if (setCodes.length === 0) return new Map();
 
   // Build all prepared statements
@@ -122,12 +123,22 @@ async function batchFetchGroups(
   // Execute all in single round-trip
   const batchResults = await db.batch(statements);
 
-  const results = new Map<string, GroupRow>();
+  const results = new Map<string, GroupRow[]>();
   for (const result of batchResults) {
     for (const g of result.results as GroupRow[]) {
-      results.set(g.abbr, g);
+      const existing = results.get(g.abbr);
+      if (existing) {
+        existing.push(g);
+      } else {
+        results.set(g.abbr, [g]);
+      }
     }
   }
+
+  for (const groups of results.values()) {
+    groups.sort((a, b) => Number(b.is_current) - Number(a.is_current) || a.group_id - b.group_id);
+  }
+
   return results;
 }
 
@@ -232,16 +243,18 @@ async function batchFetchProductsByName(
  */
 async function batchFetchProductsByCollectorPrefix(
   db: D1Database,
-  keys: Array<{ groupId: number; collectorPrefix: string; hints: ProductLookupHints }>
+  keys: Array<{ groupId: number; collectorPrefix: string; name: string; hints: ProductLookupHints }>
 ): Promise<Map<string, ProductRow>> {
   if (keys.length === 0) return new Map();
 
   // Build all prepared statements
   const statements: D1PreparedStatement[] = [];
-  for (let i = 0; i < keys.length; i += CHUNK_SIZE_PRODUCTS) {
-    const chunk = keys.slice(i, i + CHUNK_SIZE_PRODUCTS);
-    const conditions = chunk.map(() => '(group_id = ? AND collector_number LIKE ?)').join(' OR ');
-    const params = chunk.flatMap((k) => [k.groupId, `${k.collectorPrefix}/%`]);
+  for (let i = 0; i < keys.length; i += CHUNK_SIZE_PRODUCT_PREFIX) {
+    const chunk = keys.slice(i, i + CHUNK_SIZE_PRODUCT_PREFIX);
+    const conditions = chunk
+      .map(() => '(group_id = ? AND (collector_number = ? OR collector_number LIKE ?))')
+      .join(' OR ');
+    const params = chunk.flatMap((k) => [k.groupId, k.collectorPrefix, `${k.collectorPrefix}/%`]);
     statements.push(
       db.prepare(
         `SELECT product_id, group_id, name, clean_name, image_url, rarity_id, collector_number
@@ -255,8 +268,10 @@ async function batchFetchProductsByCollectorPrefix(
 
   // Build a map of hints by prefix for product selection
   const hintsMap = new Map<string, ProductLookupHints>();
+  const nameMap = new Map<string, string>();
   for (const k of keys) {
     hintsMap.set(`${k.groupId}:prefix:${k.collectorPrefix}`, k.hints);
+    nameMap.set(`${k.groupId}:prefix:${k.collectorPrefix}`, cleanName(k.name));
   }
 
   const results = new Map<string, ProductRow>();
@@ -266,7 +281,34 @@ async function batchFetchProductsByCollectorPrefix(
       const prefix = p.collector_number?.split('/')[0] || '';
       const key = `${p.group_id}:prefix:${prefix}`;
       const hints = hintsMap.get(key) || { isToken: false, isFoil: false };
+      const expectedName = nameMap.get(key) || '';
       const existing = results.get(key);
+      const candidateName = cleanName(p.name);
+      const existingName = existing ? cleanName(existing.name) : '';
+      const candidateMatchesName = expectedName !== '' &&
+        (candidateName === expectedName || candidateName.startsWith(`${expectedName} `));
+      const existingMatchesName = expectedName !== '' &&
+        (existingName === expectedName || existingName.startsWith(`${expectedName} `));
+
+      if (candidateMatchesName && !existingMatchesName) {
+        results.set(key, p);
+        continue;
+      }
+      if (existingMatchesName && !candidateMatchesName) {
+        continue;
+      }
+
+      const candidateIsExact = p.collector_number === prefix;
+      const existingIsExact = existing?.collector_number === prefix;
+
+      if (candidateIsExact && !existingIsExact) {
+        results.set(key, p);
+        continue;
+      }
+      if (existingIsExact && !candidateIsExact) {
+        continue;
+      }
+
       results.set(key, selectPreferredProduct(existing, p, hints));
     }
   }
@@ -343,28 +385,36 @@ async function processCSV(csvText: string, env: Env): Promise<{ csv: string; sta
   // Step 2: Extract unique set codes and batch fetch all groups
   const setCodes = [...new Set(normalizedCards.map((c) => c.setCode).filter((s): s is string => Boolean(s)))];
   const groupMap = await batchFetchGroups(env.DB, setCodes);
+  const groupById = new Map<number, GroupRow>();
+  for (const groups of groupMap.values()) {
+    for (const group of groups) {
+      groupById.set(group.group_id, group);
+    }
+  }
 
   // Step 3: Build product lookup keys and batch fetch products
   // LIST cards use name-based lookup (primary) + collector prefix (fallback)
   // Other sets use exact collector number lookup
   const productKeys: Array<{ groupId: number; collectorNumber: string; hints: ProductLookupHints }> = [];
   const listNameKeys: Array<{ groupId: number; name: string; hints: ProductLookupHints }> = [];
-  const listPrefixKeys: Array<{ groupId: number; collectorPrefix: string; hints: ProductLookupHints }> = [];
-  const rowProductKeys: Array<{ primary: string | null; fallback: string | null; nameFallback?: string | null }> = [];
+  const listPrefixKeys: Array<{ groupId: number; collectorPrefix: string; name: string; hints: ProductLookupHints }> = [];
+  const rowProductKeys: Array<{ candidates: string[] }> = [];
 
   for (const card of normalizedCards) {
     if (!card.setCode) {
-      rowProductKeys.push({ primary: null, fallback: null });
+      rowProductKeys.push({ candidates: [] });
       continue;
     }
 
-    const group = groupMap.get(card.setCode);
-    if (!group) {
-      rowProductKeys.push({ primary: null, fallback: null });
+    const groups = groupMap.get(card.setCode);
+    if (!groups || groups.length === 0) {
+      rowProductKeys.push({ candidates: [] });
       continue;
     }
 
     const hints: ProductLookupHints = { isToken: card.isToken, isFoil: card.isFoil };
+    const primaryCandidates: string[] = [];
+    const fallbackCandidates: string[] = [];
 
     // Sets requiring name-based product lookup
     const useNameLookup = card.setCode === 'LIST' ||
@@ -372,41 +422,41 @@ async function processCSV(csvText: string, env: Env): Promise<{ csv: string; sta
                           card.originalSetCode === 'SUNF';
 
     if (useNameLookup) {
-      const nameKey = card.name ? `${group.group_id}:name:${cleanName(card.name)}` : null;
-
-      if (card.name) {
-        listNameKeys.push({ groupId: group.group_id, name: card.name, hints });
-      }
-
-      if (card.setCode === 'LIST') {
-        // LIST: prefix fallback (existing behavior unchanged)
-        const prefixKey = card.collectorNumber
-          ? `${group.group_id}:prefix:${card.collectorNumber}` : null;
-        if (card.collectorNumber) {
-          listPrefixKeys.push({
-            groupId: group.group_id, collectorPrefix: card.collectorNumber, hints
-          });
+      for (const group of groups) {
+        if (card.name) {
+          listNameKeys.push({ groupId: group.group_id, name: card.name, hints });
+          primaryCandidates.push(`${group.group_id}:name:${cleanName(card.name)}`);
         }
-        rowProductKeys.push({ primary: nameKey, fallback: prefixKey });
-      } else {
-        // MB2PC/SUNF: name only, no fallback
-        rowProductKeys.push({ primary: nameKey, fallback: null });
+
+        if (card.setCode === 'LIST' && card.collectorNumber) {
+          listPrefixKeys.push({
+            groupId: group.group_id, collectorPrefix: card.collectorNumber, name: card.name, hints
+          });
+          fallbackCandidates.push(`${group.group_id}:prefix:${card.collectorNumber}`);
+        }
       }
+
+      rowProductKeys.push({ candidates: primaryCandidates.concat(fallbackCandidates) });
     } else {
       // All other sets: use exact collector number lookup
       if (!card.collectorNumber) {
-        rowProductKeys.push({ primary: null, fallback: null });
+        rowProductKeys.push({ candidates: [] });
         continue;
       }
-      const baseKey = `${group.group_id}:${card.collectorNumber}`;
-      const rfKey = `${baseKey}:rf`;
-      // Foil cards prefer Rainbow Foil product; non-foil cards prefer regular product
-      if (card.isFoil) {
-        rowProductKeys.push({ primary: rfKey, fallback: baseKey });
-      } else {
-        rowProductKeys.push({ primary: baseKey, fallback: rfKey });
+      for (const group of groups) {
+        const baseKey = `${group.group_id}:${card.collectorNumber}`;
+        const rfKey = `${baseKey}:rf`;
+        // Foil cards prefer Rainbow Foil product; non-foil cards prefer regular product
+        if (card.isFoil) {
+          primaryCandidates.push(rfKey);
+          fallbackCandidates.push(baseKey);
+        } else {
+          primaryCandidates.push(baseKey);
+          fallbackCandidates.push(rfKey);
+        }
+        productKeys.push({ groupId: group.group_id, collectorNumber: card.collectorNumber, hints });
       }
-      productKeys.push({ groupId: group.group_id, collectorNumber: card.collectorNumber, hints });
+      rowProductKeys.push({ candidates: primaryCandidates.concat(fallbackCandidates) });
     }
   }
 
@@ -444,21 +494,28 @@ async function processCSV(csvText: string, env: Env): Promise<{ csv: string; sta
     const keys = rowProductKeys[i];
 
     // Skip if we already have a product match
-    if (keys.primary && productMap.has(keys.primary)) continue;
-    if (keys.fallback && productMap.has(keys.fallback)) continue;
+    if (keys.candidates.some((key) => productMap.has(key))) continue;
 
     // Skip rows without a valid group or name
     if (!card.setCode || !card.name) continue;
-    const group = groupMap.get(card.setCode);
-    if (!group) continue;
+    const groups = groupMap.get(card.setCode);
+    if (!groups || groups.length === 0) continue;
 
     // Skip sets that already use name-based lookup
     const usesNameLookup = card.setCode === 'LIST' || card.setCode === 'MB2PC' || card.originalSetCode === 'SUNF';
     if (usesNameLookup) continue;
 
-    const nameKey = `${group.group_id}:name:${cleanName(card.name)}`;
-    nameFallbackKeys.push({ groupId: group.group_id, name: card.name, hints: { isToken: card.isToken, isFoil: card.isFoil } });
-    rowProductKeys[i] = { primary: keys.primary, fallback: keys.fallback, nameFallback: nameKey };
+    const fallbackCandidates: string[] = [];
+    for (const group of groups) {
+      const nameKey = `${group.group_id}:name:${cleanName(card.name)}`;
+      nameFallbackKeys.push({
+        groupId: group.group_id,
+        name: card.name,
+        hints: { isToken: card.isToken, isFoil: card.isFoil },
+      });
+      fallbackCandidates.push(nameKey);
+    }
+    rowProductKeys[i] = { candidates: keys.candidates.concat(fallbackCandidates) };
   }
 
   if (nameFallbackKeys.length > 0) {
@@ -471,12 +528,12 @@ async function processCSV(csvText: string, env: Env): Promise<{ csv: string; sta
     }
   }
 
-  // Helper to resolve product key (try primary, then fallback, then name fallback)
-  const resolveProductKey = (keys: { primary: string | null; fallback: string | null; nameFallback?: string | null }): string | null => {
-    if (keys.primary && productMap.has(keys.primary)) return keys.primary;
-    if (keys.fallback && productMap.has(keys.fallback)) return keys.fallback;
-    if (keys.nameFallback && productMap.has(keys.nameFallback)) return keys.nameFallback;
-    return keys.primary || keys.fallback; // Return for error messages
+  // Helper to resolve product key across all candidate groups and fallback strategies
+  const resolveProductKey = (keys: { candidates: string[] }): string | null => {
+    for (const key of keys.candidates) {
+      if (productMap.has(key)) return key;
+    }
+    return keys.candidates[0] || null; // Return first attempted key for error messages
   };
 
   // Step 4: Build SKU lookup keys and batch fetch SKUs
@@ -533,8 +590,8 @@ async function processCSV(csvText: string, env: Env): Promise<{ csv: string; sta
     }
 
     // Check group
-    const group = groupMap.get(card.setCode);
-    if (!group) {
+    const groups = groupMap.get(card.setCode);
+    if (!groups || groups.length === 0) {
       recordFailure(row, `No group found for set code '${card.setCode}'`);
       continue;
     }
@@ -551,6 +608,11 @@ async function processCSV(csvText: string, env: Env): Promise<{ csv: string; sta
     if (!product) {
       const identifier = card.name || `#${card.collectorNumber}`;
       recordFailure(row, `No product found for ${card.setCode} ${identifier}`);
+      continue;
+    }
+    const group = groupById.get(product.group_id);
+    if (!group) {
+      recordFailure(row, `No group metadata found for product ${product.product_id}`);
       continue;
     }
 
