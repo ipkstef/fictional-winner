@@ -579,7 +579,12 @@ function getLayoutHtml(
       <div class="col-xl-9 col-lg-10">
         <div class="page-shell">
           ${content}
-          <div class="footer">MTG CSV Processor &copy; YourFriendsHouseCo ${year}</div>
+          <div class="footer">
+            <a href="https://ko-fi.com/mtgsold" class="kofi-logo" target="_blank" rel="noopener noreferrer" style="margin-bottom:0.4rem;display:inline-flex;">
+              <img src="https://storage.ko-fi.com/cdn/fullLogoKofi.png" alt="Support on Ko-fi">
+            </a>
+            <div>MTG CSV Processor &copy; YourFriendsHouseCo ${year}</div>
+          </div>
         </div>
       </div>
     </div>
@@ -708,9 +713,6 @@ document.querySelectorAll(".js-submit-form").forEach(function(form) {
     <a href="https://mtgsold.com" class="brand-link" target="_blank" rel="noopener noreferrer">
       <img src="${brandLogoDataUrl}" alt="MTGSold">
       <span>mtgsold.com</span>
-    </a>
-    <a href="https://ko-fi.com/mtgsold" class="kofi-logo" target="_blank" rel="noopener noreferrer">
-      <img src="https://storage.ko-fi.com/cdn/fullLogoKofi.png" alt="Support on Ko-fi">
     </a>
   </div>
 </div>`;
