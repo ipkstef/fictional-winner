@@ -70,6 +70,8 @@ export interface OutputRow {
   'Total Quantity': string;
   'Add to Quantity': string;
   'TCG Marketplace Price': string;
+  'My Store Reserve Quantity'?: string;
+  'My Store Price'?: string;
   'Photo URL': string;
 }
 

@@ -41,6 +41,7 @@ function isLikelyUuid(value: string): boolean {
 export async function processCSV(
   csvText: string,
   db: D1Database,
+  proAccount = false,
 ): Promise<{ csv: string; stats: ProcessingStats }> {
   const inputRows = parseCSV(csvText);
   if (inputRows.length === 0) {
@@ -230,6 +231,9 @@ export async function processCSV(
       "Total Quantity": card.quantity.toString(),
       "Add to Quantity": card.quantity.toString(),
       "TCG Marketplace Price": price,
+      ...(proAccount
+        ? { "My Store Reserve Quantity": "0", "My Store Price": marketPrice }
+        : {}),
       "Photo URL": product.image_url || "",
     };
 
@@ -253,7 +257,7 @@ export async function processCSV(
 
   const failuresCsv = failedRows.length > 0 ? toGenericCSV(failedRows) : "";
   return {
-    csv: toCSV(outputRows),
+    csv: toCSV(outputRows, proAccount),
     stats: {
       inputRows: inputRows.length,
       matchedRows: outputRows.length,
@@ -277,6 +281,7 @@ export async function handleConvertRoute(
   try {
     const formData = await request.formData();
     const mode = String(formData.get("mode") || "");
+    const proAccount = formData.get("pro_account") === "1";
 
     let csvText = "";
     if (mode === "upload") {
@@ -304,7 +309,7 @@ export async function handleConvertRoute(
       });
     }
 
-    const { csv, stats } = await processCSV(csvText, db);
+    const { csv, stats } = await processCSV(csvText, db, proAccount);
     const body =
       mode === "upload"
         ? getUploadResultsHtml(stats, csv)

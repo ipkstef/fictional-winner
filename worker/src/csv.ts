@@ -18,7 +18,7 @@ export function parseCSV(csvText: string): SourceRow[] {
 /**
  * Convert output rows to CSV string using Papa Parse
  */
-export function toCSV(rows: OutputRow[]): string {
+export function toCSV(rows: OutputRow[], proAccount = false): string {
   if (rows.length === 0) return '';
 
   const headers: (keyof OutputRow)[] = [
@@ -37,6 +37,7 @@ export function toCSV(rows: OutputRow[]): string {
     'Total Quantity',
     'Add to Quantity',
     'TCG Marketplace Price',
+    ...(proAccount ? ['My Store Reserve Quantity' as const, 'My Store Price' as const] : []),
     'Photo URL',
   ];
 

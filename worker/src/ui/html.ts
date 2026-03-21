@@ -622,6 +622,10 @@ export function getIndexHtml(): string {
               <div class="form-text">Use your ManaBox export. The file must include the Scryfall ID column.</div>
               <div class="section-note mt-2" id="fileSelectionNote">No file selected yet.</div>
             </div>
+            <div class="form-check mb-3">
+              <input class="form-check-input" type="checkbox" id="pro_account" name="pro_account" value="1">
+              <label class="form-check-label" for="pro_account">TCGplayer Pro account <span class="form-text">(adds My Store columns)</span></label>
+            </div>
             <button type="submit" class="btn btn-primary js-submit-button" data-default-label="Upload and Convert" data-loading-label="Processing...">
               <i class="bi bi-upload"></i> Upload and Convert
             </button>
@@ -636,6 +640,10 @@ export function getIndexHtml(): string {
               <label for="csv_content" class="form-label">Paste CSV content</label>
               <textarea class="form-control" id="csv_content" name="csv_content" rows="10" placeholder="Paste the full CSV export here..." required></textarea>
               <div class="form-text">The first row should include headers, including Scryfall ID.</div>
+            </div>
+            <div class="form-check mb-3">
+              <input class="form-check-input" type="checkbox" id="pro_account_paste" name="pro_account" value="1">
+              <label class="form-check-label" for="pro_account_paste">TCGplayer Pro account <span class="form-text">(adds My Store columns)</span></label>
             </div>
             <button type="submit" class="btn btn-primary js-submit-button" data-default-label="Process CSV" data-loading-label="Processing...">
               <i class="bi bi-arrow-repeat"></i> Process CSV
