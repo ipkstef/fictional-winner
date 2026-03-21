@@ -1,35 +1,56 @@
-// Input CSV row (from ManaBox or similar)
-export interface InputRow {
-  Name?: string;
-  'Set code': string;
-  'Collector number': string;
-  Foil: string;
-  Condition: string;
-  Language?: string;
-  Quantity: string;
-  'Purchase price'?: string;
-}
+// Generic parsed CSV row. Source adapters map this into NormalizedCard.
+export type SourceRow = Record<string, string | undefined>;
 
 // Normalized card data for matching (source-agnostic)
 export interface NormalizedCard {
-  name: string;
-  setCode: string;           // TCGPlayer set code (e.g., "OTJ", "LIST")
-  collectorNumber: string;   // Normalized collector number
-  isToken: boolean;          // True if this is a token
-  isFoil: boolean;           // True if foil/rainbow foil
+  /** True when ManaBox `Foil` is `etched` — maps to tcgplayer_etched_id when available */
+  isEtched: boolean;
+  /** True for any foil finish (foil or etched) */
+  isFoil: boolean;
   condition: string;
   language: string;
   quantity: number;
   purchasePrice?: string;
-  // Original values for debugging
-  originalSetCode: string;
+  /** Lowercase Scryfall card id when CSV had a valid UUID */
+  scryfallId?: string;
+  // Original values kept for output/debug context
   originalCollectorNumber: string;
 }
 
-// Hints for selecting the right product when multiple match
-export interface ProductLookupHints {
-  isToken: boolean;
-  isFoil: boolean;
+export interface FailureRowContext {
+  Name: string;
+  "Set code": string;
+  "Collector number": string;
+  "Scryfall ID": string;
+  Quantity: string;
+  Condition: string;
+  Foil: string;
+  Language: string;
+}
+
+/**
+ * Adapter interface to normalize source-specific CSV schemas.
+ * Add more adapters (e.g. moxfield, archidekt) without changing core matching flow.
+ */
+export interface CsvSourceAdapter {
+  id: string;
+  requiredHeaders: string[];
+  canHandle(headers: string[]): boolean;
+  normalizeRow(row: SourceRow): NormalizedCard;
+  toFailureContext(row: SourceRow): FailureRowContext;
+}
+
+export interface FailedRow extends FailureRowContext {
+  "Failure Reason": string;
+}
+
+export interface ProcessingStats {
+  inputRows: number;
+  matchedRows: number;
+  aggregatedFrom: number;
+  errors: number;
+  sampleErrors: string[];
+  failuresCsv: string;
 }
 
 // Output CSV row (TCGPlayer format)
@@ -128,19 +149,5 @@ export const CONDITION_NAMES: Record<number, string> = {
   3: 'Moderately Played',
   4: 'Heavily Played',
   5: 'Damaged',
-};
-
-// Set code overrides for ManaBox → TCGPlayer mapping
-export const SET_CODE_MAP: Record<string, string> = {
-  PLST: 'LIST',
-  ULST: 'LIST',
-  SUNF: 'UNF',
-  JTLA: 'TLA',
-  PM21: 'PPM21',
-  PDSK: 'PPDSK',
-  GVL: 'DDD',
-  JVC: 'DD2',
-  DVD: 'DDC',
-  GK1: 'GR1',
 };
 

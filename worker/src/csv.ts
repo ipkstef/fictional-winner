@@ -1,14 +1,14 @@
 import Papa from 'papaparse';
-import type { InputRow, OutputRow } from './types';
+import type { OutputRow, SourceRow } from './types';
 
 /**
  * Parse CSV string into array of objects using Papa Parse
  */
-export function parseCSV(csvText: string): InputRow[] {
+export function parseCSV(csvText: string): SourceRow[] {
   // Normalize line endings (handle \r\r\n, \r\n, \r -> \n)
   const normalized = csvText.replace(/\r\r\n/g, '\n').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 
-  const result = Papa.parse<InputRow>(normalized, {
+  const result = Papa.parse<SourceRow>(normalized, {
     header: true,
     skipEmptyLines: true,
   });

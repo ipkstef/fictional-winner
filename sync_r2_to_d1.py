@@ -2,23 +2,27 @@
 """
 Sync R2 Parquet data to Cloudflare D1.
 
-Flow: R2 Parquet → DuckDB → SQLite → SQL dump → D1
+Flow: R2 Parquet → DuckDB → SQLite → scryfall_bridge (Scryfall bulk JSON) → SQL dump → D1
 
 Usage:
-    python sync_r2_to_d1.py                    # Full sync
+    python sync_r2_to_d1.py                    # Full sync (downloads default_cards if needed)
     python sync_r2_to_d1.py --skip-download    # Use existing tcg_data.db
     python sync_r2_to_d1.py --skip-import      # Create files only, don't import to D1
+    python sync_r2_to_d1.py --skip-scryfall-bridge   # Omit scryfall_bridge table
 """
 
 import argparse
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 import duckdb
 from dotenv import load_dotenv
+
+import scryfall_bridge
 
 load_dotenv()
 
@@ -32,7 +36,14 @@ CATEGORY_ID = "1"
 SQLITE_FILE = Path("tcg_data.db")
 DUMP_DIR = Path(".")  # Directory for dump files
 SKU_CHUNK_SIZE = 500_000  # Split SKUs into chunks to avoid D1 reset
-PRODUCTS_CHUNK_SIZE = 50_000  # Split products into chunks to avoid D1 CPU limits
+# D1 rejects statements over ~100 KB; huge image_url/name rows break .mode insert lines.
+# Smaller chunks also reduce remote batch CPU/time failures (wrangler d1 execute --file).
+PRODUCTS_CHUNK_SIZE = 12_000
+
+# Character caps for products text columns when exporting (UTF-8 byte size of INSERT still matters).
+_PRODUCT_NAME_CAP = 3000
+_PRODUCT_CLEAN_CAP = 3000
+_PRODUCT_IMAGE_URL_CAP = 8000
 
 LOG_PREFIX = Path(__file__).name
 
@@ -128,7 +139,86 @@ def download_parquet_to_sqlite() -> None:
     log(f"  Output: {SQLITE_FILE} ({SQLITE_FILE.stat().st_size / 1024 / 1024:.1f} MB)")
 
 
-def create_sql_dumps() -> list[Path]:
+def _sqlite_quoted_ident(name: str) -> str:
+    """Double-quote a SQLite identifier (handles reserved words and special chars)."""
+    return '"' + name.replace('"', '""') + '"'
+
+
+def _sqlite_table_column_names(db_path: Path, table: str) -> list[str]:
+    """Table columns in creation order (matches INSERT column order for .mode insert)."""
+    result = subprocess.run(
+        ["sqlite3", str(db_path), f"PRAGMA table_info({table});"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    cols: list[str] = []
+    for line in (result.stdout or "").strip().splitlines():
+        parts = line.split("|")
+        if len(parts) >= 2 and parts[1].strip():
+            cols.append(parts[1])
+    return cols
+
+
+def _products_select_fragment(col: str) -> str:
+    """One SELECT expression per products column; cap long text fields for D1 statement limits."""
+    q = _sqlite_quoted_ident(col)
+    if col == "name":
+        return f"substr(COALESCE({q}, ''), 1, {_PRODUCT_NAME_CAP})"
+    if col == "clean_name":
+        return f"substr(COALESCE({q}, ''), 1, {_PRODUCT_CLEAN_CAP})"
+    if col == "image_url":
+        return (
+            f"CASE WHEN {q} IS NULL THEN NULL "
+            f"WHEN length({q}) > {_PRODUCT_IMAGE_URL_CAP} "
+            f"THEN substr({q}, 1, {_PRODUCT_IMAGE_URL_CAP}) ELSE {q} END"
+        )
+    return q
+
+
+def _products_export_sql(columns: list[str], limit: int, offset: int) -> str:
+    """Full SELECT: one expression per physical column, same order as PRAGMA table_info."""
+    parts = [_products_select_fragment(c) for c in columns]
+    return (
+        f"SELECT {', '.join(parts)} FROM products "
+        f"LIMIT {int(limit)} OFFSET {int(offset)}"
+    )
+
+
+def _log_wrangler_output(text: str, *, label: str) -> None:
+    """Log long wrangler output with head/tail (errors are often JSON at the end)."""
+    t = (text or "").strip()
+    if not t:
+        log(f"  {label}: (empty)")
+        return
+    head, tail = 3500, 3500
+    if len(t) <= head + tail + 120:
+        log(f"  {label}:\n{t}")
+        return
+    log(
+        f"  {label} ({len(t)} chars, showing head+tail):\n"
+        f"{t[:head]}\n... [{len(t) - head - tail} chars omitted] ...\n{t[-tail:]}"
+    )
+
+
+def sqlite_table_exists(db_path: Path, table: str) -> bool:
+    """Return True if SQLite db exists and contains the named table."""
+    if not db_path.is_file():
+        return False
+    result = subprocess.run(
+        [
+            "sqlite3",
+            str(db_path),
+            f"SELECT 1 FROM sqlite_master WHERE type='table' AND name='{table}' LIMIT 1;",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return bool(result.stdout.strip())
+
+
+def create_sql_dumps(products_chunk_size: int | None = None) -> list[Path]:
     """Export SQLite to multiple SQL dump files, compatible with D1.
 
     Returns list of dump files in import order.
@@ -185,12 +275,21 @@ def create_sql_dumps() -> list[Path]:
             check=True,
         )
         dump_path = DUMP_DIR / f"dump_{table_name}.sql"
-        dump_path.write_text("\n".join([f"-- Full refresh for {table_name}", result.stdout.strip(), ""]))
+        # D1 remote `wrangler d1 execute --file` can mis-parse multi-statement files that
+        # start with `--` comments (workers-sdk#4713); emit statements only.
+        body = (result.stdout or "").strip()
+        dump_path.write_text(body + "\n" if body else "")
         log("done")
         return dump_path
 
     # 2. Groups dump (small table)
     dump_files.append(write_full_dump("groups"))
+
+    # 2b. Scryfall bridge (ManaBox Scryfall UUID -> TCGPlayer product_id), optional small table
+    if sqlite_table_exists(SQLITE_FILE, "scryfall_bridge"):
+        dump_files.append(write_full_dump("scryfall_bridge"))
+    else:
+        log("  (no scryfall_bridge table — skipped dump)")
 
     # 3. Products dump - chunked to avoid D1 CPU limit.
     log("  Counting products...", end=" ", flush=True)
@@ -203,29 +302,35 @@ def create_sql_dumps() -> list[Path]:
     products_count = int(products_count_result.stdout.strip())
     log(f"{products_count:,} rows")
 
-    products_chunks = (products_count + PRODUCTS_CHUNK_SIZE - 1) // PRODUCTS_CHUNK_SIZE
-    log(f"  Splitting products into {products_chunks} chunks of ~{PRODUCTS_CHUNK_SIZE:,} rows each")
+    product_columns = _sqlite_table_column_names(SQLITE_FILE, "products")
+    if not product_columns:
+        log("Error: could not read columns for products (PRAGMA table_info)")
+        sys.exit(1)
+    log(f"  products table has {len(product_columns)} columns (export preserves all, caps long text)")
 
-    for i, offset in enumerate(range(0, products_count, PRODUCTS_CHUNK_SIZE)):
+    psize = products_chunk_size if products_chunk_size is not None else PRODUCTS_CHUNK_SIZE
+    products_chunks = (products_count + psize - 1) // psize
+    log(
+        f"  Splitting products into {products_chunks} chunks of ~{psize:,} rows "
+        f"(text columns capped for D1 statement size limit)"
+    )
+
+    for i, offset in enumerate(range(0, products_count, psize)):
         chunk_file = DUMP_DIR / f"dump_products_{i}.sql"
         log(f"  Dumping products chunk {i} (offset {offset:,})...", end=" ", flush=True)
         result = subprocess.run(
             [
-                "sqlite3", str(SQLITE_FILE),
-                "-cmd", ".mode insert products",
-                f"SELECT * FROM products LIMIT {PRODUCTS_CHUNK_SIZE} OFFSET {offset};"
+                "sqlite3",
+                str(SQLITE_FILE),
+                "-cmd",
+                ".mode insert products",
+                _products_export_sql(product_columns, psize, offset),
             ],
             capture_output=True,
             text=True,
             check=True,
         )
-        chunk_content = "\n".join(
-            [
-                f"-- Insert products chunk {i}",
-                result.stdout.strip(),
-                "",
-            ]
-        )
+        chunk_content = (result.stdout or "").strip() + "\n"
         chunk_file.write_text(chunk_content)
         log("done")
         dump_files.append(chunk_file)
@@ -257,13 +362,7 @@ def create_sql_dumps() -> list[Path]:
             text=True,
             check=True,
         )
-        chunk_content = "\n".join(
-            [
-                f"-- Insert SKU chunk {i}",
-                result.stdout.strip(),
-                "",
-            ]
-        )
+        chunk_content = (result.stdout or "").strip() + "\n"
         chunk_file.write_text(chunk_content)
         log("done")
         dump_files.append(chunk_file)
@@ -277,6 +376,14 @@ def create_sql_dumps() -> list[Path]:
     return dump_files
 
 
+def _wrangler_cmd() -> list[str]:
+    """Prefer global wrangler (CI installs it); fall back to npx with --yes for non-interactive runs."""
+    exe = shutil.which("wrangler")
+    if exe:
+        return [exe]
+    return ["npx", "--yes", "wrangler"]
+
+
 def import_to_d1(database: str, working_dir: Path, dump_files: list[Path]) -> None:
     """Import SQL dump files to Cloudflare D1 sequentially."""
     log(f"\n[3/3] Importing to D1 ({database})")
@@ -285,8 +392,16 @@ def import_to_d1(database: str, working_dir: Path, dump_files: list[Path]) -> No
         dump_path = dump_file.resolve()
         log(f"  [{i+1}/{len(dump_files)}] Importing {dump_file.name}...", end=" ", flush=True)
 
+        cmd = [
+            *_wrangler_cmd(),
+            "d1",
+            "execute",
+            database,
+            "--remote",
+            f"--file={dump_path}",
+        ]
         result = subprocess.run(
-            ["npx", "wrangler", "d1", "execute", database, "--remote", f"--file={dump_path}"],
+            cmd,
             cwd=working_dir,
             capture_output=True,
             text=True,
@@ -294,8 +409,11 @@ def import_to_d1(database: str, working_dir: Path, dump_files: list[Path]) -> No
 
         if result.returncode != 0:
             log("FAILED")
-            log(f"  Error: {result.stderr}")
-            log(f"  Stdout: {result.stdout}")
+            err = (result.stderr or "").strip()
+            out = (result.stdout or "").strip()
+            log(f"  returncode={result.returncode} cmd={' '.join(cmd[:3])} ... --file=...")
+            _log_wrangler_output(err, label="stderr")
+            _log_wrangler_output(out, label="stdout")
             sys.exit(1)
 
         log("done")
@@ -312,7 +430,37 @@ def main():
     parser.add_argument("--skip-download", action="store_true", help="Skip Parquet download, use existing SQLite")
     parser.add_argument("--skip-import", action="store_true", help="Skip D1 import, only create local files")
     parser.add_argument("--working-dir", type=Path, default=Path(__file__).parent / "worker")
+    parser.add_argument(
+        "--skip-scryfall-bridge",
+        action="store_true",
+        help="Do not download/populate scryfall_bridge (D1 will omit this table on import)",
+    )
+    parser.add_argument(
+        "--scryfall-json",
+        type=Path,
+        default=None,
+        help="Path to Scryfall default_cards JSON (default: ./default-cards.json; downloaded if missing)",
+    )
+    parser.add_argument(
+        "--refresh-scryfall-json",
+        action="store_true",
+        help="Re-download default_cards bulk file even if --scryfall-json already exists",
+    )
+    parser.add_argument(
+        "--products-chunk-size",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            f"Rows per products SQL dump file (default {PRODUCTS_CHUNK_SIZE}). "
+            "Lower if wrangler fails mid-import (timeouts or statement size)."
+        ),
+    )
     args = parser.parse_args()
+
+    if args.products_chunk_size is not None and args.products_chunk_size < 1:
+        log("Error: --products-chunk-size must be >= 1")
+        sys.exit(1)
 
     log("=" * 60)
     log("TCG Matcher: R2 Parquet → D1 Sync")
@@ -329,8 +477,21 @@ def main():
     else:
         download_parquet_to_sqlite()
 
+    # Step 1b: Scryfall id → TCGPlayer product bridge (streams bulk JSON; bounded memory)
+    if args.skip_scryfall_bridge:
+        log("\n[1b/3] Skipping scryfall_bridge (--skip-scryfall-bridge)")
+    else:
+        log("\n[1b/3] Building scryfall_bridge")
+        default_json = Path(__file__).resolve().parent / "default-cards.json"
+        json_path = args.scryfall_json or default_json
+        scryfall_bridge.ensure_default_cards_json(
+            json_path,
+            force_download=args.refresh_scryfall_json,
+        )
+        scryfall_bridge.populate_scryfall_bridge(SQLITE_FILE, json_path)
+
     # Step 2: Create SQL dump files
-    dump_files = create_sql_dumps()
+    dump_files = create_sql_dumps(products_chunk_size=args.products_chunk_size)
 
     # Step 3: Import to D1
     if args.skip_import:
@@ -338,7 +499,9 @@ def main():
         log("  To import manually, run these commands in order:")
         log(f"    cd {args.working_dir}")
         for dump_file in dump_files:
-            log(f"    npx wrangler d1 execute {args.database} --remote --file={dump_file.resolve()}")
+            log(
+                f"    wrangler d1 execute {args.database} --remote --file={dump_file.resolve()}"
+            )
     else:
         import_to_d1(args.database, args.working_dir, dump_files)
 

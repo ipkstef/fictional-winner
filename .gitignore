@@ -1,9 +1,11 @@
 *.db
 *.csv
-*.json
 *.bz2
-*.sql
 .wrangler
 node_modules
 .env
 wrangler.toml
+__pycache__/
+.venv/
+.claude/
+.playwright-mcp/

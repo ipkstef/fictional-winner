@@ -1,108 +1,141 @@
-# MTG CSV Processor
+# MTG CSV Processor (Cloudflare Worker)
 
-A web application to convert ManaBox CSV exports to TCGPlayer-compatible format.
+Convert card inventory CSVs (currently ManaBox) into TCGPlayer bulk CSV format using a Scryfall-ID-first matching pipeline on Cloudflare D1.
+
+## Current matching model
+
+The Worker now uses a single primary path:
+
+1. Parse source CSV using an adapter.
+2. Normalize rows to a source-agnostic shape.
+3. Resolve `Scryfall ID` through `scryfall_bridge`.
+4. Resolve TCG product in `products`.
+5. Resolve SKU in `skus` by:
+   - `product_id`
+   - `printing_id` (normal / foil / etched behavior)
+   - `condition_id`
+   - `language_id`
+
+Legacy set/collector/name fallback matching has been removed from the core processing path.
 
 ## Features
 
-- Upload ManaBox CSV exports
-- Match cards with TCGPlayer SKUs using a local SQLite database
-- Generate TCGPlayer-compatible CSV for bulk imports
-- View processing results and errors
-- Download processed CSV files
+- Browser upload + paste modes
+- Scryfall-ID-first matching for higher accuracy
+- Condition/language/finish-aware SKU selection
+- Failure CSV with explicit reasons (missing/invalid/unmapped Scryfall ID, SKU miss)
+- Adapter-based CSV ingestion for future source formats
 
-## Prerequisites
+## Repository layout
 
-- Python 3.7+
-- SQLite database file (`mtg.db`) with Scryfall and SKU data
+- `worker/` - Cloudflare Worker app
+  - `src/main.ts` - HTTP entrypoint and route wiring
+  - `src/routes/convert.ts` - CSV conversion orchestration
+  - `src/matcher/scryfall.ts` - bridge/product resolution helpers
+  - `src/matcher/sku.ts` - SKU batch query helpers
+  - `src/ui/html.ts` - HTML rendering
+  - `src/manabox.ts` - ManaBox adapter
+  - `src/custom-source.ts` - scaffold for next CSV source
+  - `src/sources.ts` - adapter registry + auto-detection
+- `sync_r2_to_d1.py` - R2 Parquet -> SQLite -> SQL dumps -> D1 sync
+- `scryfall_bridge.py` - builds `scryfall_bridge` from Scryfall bulk data
 
-## Installation
+## D1 tables used by the Worker
 
-1. Clone the repository:
-   ```
-   git clone https://github.com/yourusername/mtg-csv-processor.git
-   cd mtg-csv-processor
-   ```
+- `groups`
+- `products`
+- `skus`
+- `scryfall_bridge` (`scryfall_id`, `product_id`, `etched_product_id`)
 
-2. Create a virtual environment:
-   ```
-   python -m venv venv
-   
-   # On Windows
-   venv\Scripts\activate
-   
-   # On macOS/Linux
-   source venv/bin/activate
-   ```
+## Local development
 
-3. Install dependencies:
-   ```
-   pip install -r requirements.txt
-   ```
+### Worker setup
 
-4. Ensure you have the `mtg.db` database file in the project directory.
-   - This SQLite database should contain the necessary Scryfall data and TCGPlayer SKUs.
-   - If you don't have the database, you can run the `create_scrydb.py` script to generate it.
+```bash
+cd worker
+npm install
+npx wrangler whoami
+```
 
-## Usage
+### Typecheck
 
-1. Start the Flask application:
-   ```
-   python app.py
-   ```
+```bash
+cd worker
+npx tsc -p tsconfig.json --noEmit
+```
 
-2. Open your web browser and navigate to:
-   ```
-   http://localhost:5000
-   ```
+### Dev server
 
-3. Upload your ManaBox CSV export file.
+```bash
+cd worker
+npx wrangler dev
+```
 
-4. After processing, you'll be redirected to the results page where you can:
-   - View processing statistics
-   - See any errors or skipped cards
-   - Download the TCGPlayer-compatible CSV
+If Wrangler asks for preview bindings, configure preview resources in `worker/wrangler.toml`.
 
-5. Import the downloaded CSV to TCGPlayer.
+## Data sync and bridge build
 
-## ManaBox CSV Format
+### Full sync (R2 -> D1)
 
-The application expects the ManaBox CSV to have the following columns:
-- Name
-- Scryfall ID
-- Quantity
-- Purchase price
-- Condition
-- Foil
+```bash
+python sync_r2_to_d1.py
+```
 
-## Development
+Useful flags:
 
-### Project Structure
+- `--skip-download` - reuse existing `tcg_data.db`
+- `--skip-import` - only build local SQL dumps
+- `--skip-scryfall-bridge` - skip bridge table population
+- `--products-chunk-size N` - tune D1 import chunking
 
-- `app.py`: Main Flask application
-- `templates/`: HTML templates
-- `mtg.db`: SQLite database with Scryfall and TCGPlayer data
-- `requirements.txt`: Python dependencies
+### Bridge-only build
 
-### Database Schema
+```bash
+python scryfall_bridge.py /path/to/tcg_data.db
+```
 
-The application expects two tables in the SQLite database:
+Downloads `default_cards` from Scryfall (if missing) and populates `scryfall_bridge`.
 
-1. `scryfall`: Contains card data with at least these columns:
-   - `id`: Scryfall ID
-   - `tcgplayer_id`: TCGPlayer product ID
-   - `tcgplayer_etched_id`: TCGPlayer product ID for etched versions
+## CSV source adapters
 
-2. `sku`: Contains TCGPlayer SKU data with at least these columns:
-   - `skuId`: TCGPlayer SKU ID
-   - `productId`: TCGPlayer product ID
-   - `language`: Card language
-   - `condition`: Card condition
-   - `printing`: Printing type ("FOIL" or "NON FOIL")
+Source handling is adapter-driven via `CsvSourceAdapter`.
+
+Current adapters:
+
+- `manabox` (active)
+- `custom-source` (scaffold, intentionally non-matching until configured)
+
+To onboard a new source quickly, edit only:
+
+- `worker/src/custom-source.ts`
+
+Steps:
+
+1. Set `id`
+2. Replace `requiredHeaders`
+3. Map fields in:
+   - `normalizeRow()`
+   - `toFailureContext()`
+
+No core matcher changes are required.
+
+## Expected columns for ManaBox
+
+Minimum columns used:
+
+- `Scryfall ID`
+- `Foil`
+- `Condition`
+- `Language` (defaults to `en` if empty)
+- `Quantity`
+- `Collector number` (for output metadata)
+- `Purchase price` (optional)
+
+## Validation files
+
+- `full test.csv` - one card across multiple finishes/conditions
+- `fin .csv` - broader real-world sample
 
 ## License
 
 MIT
-
-## Contributors
-
-- Your Name 
