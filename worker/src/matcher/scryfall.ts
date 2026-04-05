@@ -19,16 +19,21 @@ export async function batchFetchScryfallBridge(
 ): Promise<Map<string, ScryfallBridgeRow>> {
   if (scryfallIds.length === 0) return new Map();
   const unique = [...new Set(scryfallIds)];
-  const out = new Map<string, ScryfallBridgeRow>();
+  const statements: D1PreparedStatement[] = [];
   for (let i = 0; i < unique.length; i += CHUNK_SIZE_IN) {
     const chunk = unique.slice(i, i + CHUNK_SIZE_IN);
     const placeholders = chunk.map(() => "?").join(",");
-    const result = await db
-      .prepare(
-        `SELECT scryfall_id, product_id, etched_product_id FROM scryfall_bridge WHERE scryfall_id IN (${placeholders})`,
-      )
-      .bind(...chunk)
-      .all();
+    statements.push(
+      db
+        .prepare(
+          `SELECT scryfall_id, product_id, etched_product_id FROM scryfall_bridge WHERE scryfall_id IN (${placeholders})`,
+        )
+        .bind(...chunk),
+    );
+  }
+  const batchResults = await db.batch(statements);
+  const out = new Map<string, ScryfallBridgeRow>();
+  for (const result of batchResults) {
     for (const row of result.results as unknown as ScryfallBridgeRow[]) {
       out.set(row.scryfall_id, row);
     }
@@ -42,17 +47,22 @@ export async function batchFetchProductsByProductIds(
 ): Promise<Map<number, ProductRow>> {
   if (productIds.length === 0) return new Map();
   const unique = [...new Set(productIds)];
-  const out = new Map<number, ProductRow>();
+  const statements: D1PreparedStatement[] = [];
   for (let i = 0; i < unique.length; i += CHUNK_SIZE_IN) {
     const chunk = unique.slice(i, i + CHUNK_SIZE_IN);
     const placeholders = chunk.map(() => "?").join(",");
-    const result = await db
-      .prepare(
-        `SELECT product_id, group_id, name, clean_name, image_url, rarity_id, collector_number
+    statements.push(
+      db
+        .prepare(
+          `SELECT product_id, group_id, name, clean_name, image_url, rarity_id, collector_number
          FROM products WHERE product_id IN (${placeholders})`,
-      )
-      .bind(...chunk)
-      .all();
+        )
+        .bind(...chunk),
+    );
+  }
+  const batchResults = await db.batch(statements);
+  const out = new Map<number, ProductRow>();
+  for (const result of batchResults) {
     for (const p of result.results as unknown as ProductRow[]) {
       out.set(p.product_id, p);
     }
@@ -66,16 +76,21 @@ export async function batchFetchGroupsByIds(
 ): Promise<Map<number, GroupRow>> {
   if (groupIds.length === 0) return new Map();
   const unique = [...new Set(groupIds)];
-  const out = new Map<number, GroupRow>();
+  const statements: D1PreparedStatement[] = [];
   for (let i = 0; i < unique.length; i += CHUNK_SIZE_IN) {
     const chunk = unique.slice(i, i + CHUNK_SIZE_IN);
     const placeholders = chunk.map(() => "?").join(",");
-    const result = await db
-      .prepare(
-        `SELECT group_id, name, abbr, is_current FROM groups WHERE group_id IN (${placeholders})`,
-      )
-      .bind(...chunk)
-      .all();
+    statements.push(
+      db
+        .prepare(
+          `SELECT group_id, name, abbr, is_current FROM groups WHERE group_id IN (${placeholders})`,
+        )
+        .bind(...chunk),
+    );
+  }
+  const batchResults = await db.batch(statements);
+  const out = new Map<number, GroupRow>();
+  for (const result of batchResults) {
     for (const g of result.results as unknown as GroupRow[]) {
       out.set(g.group_id, g);
     }
