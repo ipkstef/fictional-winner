@@ -10,7 +10,7 @@ export function parseCSV(csvText: string): SourceRow[] {
 
   const result = Papa.parse<SourceRow>(normalized, {
     header: true,
-    skipEmptyLines: true,
+    skipEmptyLines: 'greedy',
   });
   return result.data;
 }
