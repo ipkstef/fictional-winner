@@ -436,15 +436,21 @@ def main():
         help="Do not download/populate scryfall_bridge (D1 will omit this table on import)",
     )
     parser.add_argument(
-        "--scryfall-json",
+        "--scryfall-jsonl",
         type=Path,
         default=None,
-        help="Path to Scryfall default_cards JSON (default: ./default-cards.json; downloaded if missing)",
+        help=(
+            "Path to gzip-compressed Scryfall default_cards JSONL "
+            "(default: ./default-cards.jsonl.gz; downloaded if missing)"
+        ),
     )
     parser.add_argument(
-        "--refresh-scryfall-json",
+        "--refresh-scryfall-jsonl",
         action="store_true",
-        help="Re-download default_cards bulk file even if --scryfall-json already exists",
+        help=(
+            "Re-download default_cards bulk file even if --scryfall-jsonl "
+            "already exists"
+        ),
     )
     parser.add_argument(
         "--products-chunk-size",
@@ -482,13 +488,13 @@ def main():
         log("\n[1b/3] Skipping scryfall_bridge (--skip-scryfall-bridge)")
     else:
         log("\n[1b/3] Building scryfall_bridge")
-        default_json = Path(__file__).resolve().parent / "default-cards.json"
-        json_path = args.scryfall_json or default_json
-        scryfall_bridge.ensure_default_cards_json(
-            json_path,
-            force_download=args.refresh_scryfall_json,
+        default_jsonl = Path(__file__).resolve().parent / "default-cards.jsonl.gz"
+        jsonl_path = args.scryfall_jsonl or default_jsonl
+        scryfall_bridge.ensure_default_cards_file(
+            jsonl_path,
+            force_download=args.refresh_scryfall_jsonl,
         )
-        scryfall_bridge.populate_scryfall_bridge(SQLITE_FILE, json_path)
+        scryfall_bridge.populate_scryfall_bridge(SQLITE_FILE, jsonl_path)
 
     # Step 2: Create SQL dump files
     dump_files = create_sql_dumps(products_chunk_size=args.products_chunk_size)

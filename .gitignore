@@ -1,6 +1,6 @@
 *.db
 *.csv
-*.bz2
+default-cards.jsonl.gz
 .wrangler
 node_modules
 .env

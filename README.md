@@ -86,6 +86,8 @@ Useful flags:
 - `--skip-download` - reuse existing `tcg_data.db`
 - `--skip-import` - only build local SQL dumps
 - `--skip-scryfall-bridge` - skip bridge table population
+- `--scryfall-jsonl PATH` - use an existing gzip-compressed Scryfall JSONL file
+- `--refresh-scryfall-jsonl` - force a fresh Scryfall bulk-data download
 - `--products-chunk-size N` - tune D1 import chunking
 
 ### Bridge-only build
@@ -94,7 +96,8 @@ Useful flags:
 python scryfall_bridge.py /path/to/tcg_data.db
 ```
 
-Downloads `default_cards` from Scryfall (if missing) and populates `scryfall_bridge`.
+Downloads Scryfall's gzip-compressed `default_cards` JSONL (if missing), streams it
+without loading the full dataset into memory, and populates `scryfall_bridge`.
 
 ## CSV source adapters
 
