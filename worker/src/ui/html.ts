@@ -334,6 +334,85 @@ function getLayoutHtml(
       margin-top: 0.45rem;
     }
 
+    .condition-legend {
+      margin-top: 1rem;
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .condition-legend-header {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.75rem 0;
+    }
+
+    .condition-legend-title {
+      font-size: 0.78rem;
+      font-weight: 700;
+    }
+
+    .condition-legend-direction {
+      margin-left: auto;
+      color: var(--muted);
+      font-size: 0.68rem;
+    }
+
+    .condition-map-grid {
+      margin: 0 0 0.55rem;
+    }
+
+    .condition-map-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.65rem;
+      padding: 0.4rem 0;
+      border-top: 1px solid rgba(95, 73, 49, 0.1);
+    }
+
+    .condition-map-row dt,
+    .condition-map-row dd {
+      margin: 0;
+    }
+
+    .condition-map-row dt {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.25rem;
+      min-width: 0;
+    }
+
+    .condition-map-row code {
+      color: var(--muted);
+      font-size: 0.67rem;
+    }
+
+    .condition-map-row code:not(:last-child)::after {
+      content: ",";
+    }
+
+    .condition-map-row dd {
+      flex: 0 0 auto;
+      color: var(--text);
+      font-size: 0.68rem;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    .condition-map-row dd::before {
+      content: "→";
+      margin-right: 0.4rem;
+      color: var(--accent);
+      font-weight: 400;
+    }
+
+    .condition-legend-note {
+      margin: 0 0 0.75rem;
+      color: var(--muted);
+      font-size: 0.68rem;
+    }
+
     .support-dock-wrap {
       display: flex;
       justify-content: center;
@@ -528,6 +607,74 @@ function getLayoutHtml(
       margin-top: 1.1rem;
     }
 
+    .deckbuilder-promo {
+      width: min(100%, 680px);
+      margin: 0 auto 1rem;
+      padding: 0.8rem 0.9rem;
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 0.8rem;
+      color: var(--text);
+      text-align: left;
+      text-decoration: none;
+      background: rgba(255, 253, 250, 0.55);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      transition: background-color 0.15s ease, border-color 0.15s ease;
+    }
+
+    .deckbuilder-promo:hover,
+    .deckbuilder-promo:focus-visible {
+      color: var(--text);
+      background: rgba(255, 253, 250, 0.88);
+      border-color: rgba(95, 73, 49, 0.28);
+    }
+
+    .deckbuilder-mark {
+      width: 2.25rem;
+      height: 2.25rem;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid rgba(45, 36, 29, 0.55);
+      background: #f4f1eb;
+      color: #1a1a1a;
+      font-family: "Fraunces", Georgia, serif;
+      font-size: 0.9rem;
+      font-weight: 700;
+      line-height: 1;
+    }
+
+    .deckbuilder-message {
+      min-width: 0;
+    }
+
+    .deckbuilder-title {
+      display: block;
+      margin-bottom: 0.12rem;
+      font-size: 0.8rem;
+      font-weight: 700;
+      line-height: 1.25;
+    }
+
+    .deckbuilder-copy {
+      display: block;
+      color: var(--muted);
+      font-size: 0.72rem;
+      line-height: 1.4;
+    }
+
+    .deckbuilder-cta {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      color: var(--accent-strong);
+      font-size: 0.72rem;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
     @media (max-width: 991.98px) {
       .stats-grid,
       .instruction-grid {
@@ -568,6 +715,14 @@ function getLayoutHtml(
       .support-dock-wrap {
         justify-content: center;
       }
+
+      .deckbuilder-promo {
+        grid-template-columns: auto minmax(0, 1fr);
+      }
+
+      .deckbuilder-cta {
+        grid-column: 2;
+      }
     }
 
     ${additionalStyles}
@@ -580,6 +735,14 @@ function getLayoutHtml(
         <div class="page-shell">
           ${content}
           <div class="footer">
+            <a href="https://mtgdeck.build" class="deckbuilder-promo" target="_blank" rel="noopener noreferrer" aria-label="Try MTG Deckbuilder at mtgdeck.build">
+              <span class="deckbuilder-mark" aria-hidden="true">Db</span>
+              <span class="deckbuilder-message">
+                <span class="deckbuilder-title">MTG Deckbuilder — Build decks from cards you own</span>
+                <span class="deckbuilder-copy">Create format-legal Commander, Pauper, Legacy, Brawl &amp; more decks using only your collection.</span>
+              </span>
+              <span class="deckbuilder-cta">mtgdeck.build <i class="bi bi-arrow-up-right" aria-hidden="true"></i></span>
+            </a>
             <a href="https://ko-fi.com/mtgsold" class="kofi-logo" target="_blank" rel="noopener noreferrer" style="margin-bottom:0.4rem;display:inline-flex;">
               <img src="https://storage.ko-fi.com/cdn/fullLogoKofi.png" alt="Support on Ko-fi">
             </a>
@@ -702,6 +865,31 @@ document.querySelectorAll(".js-submit-form").forEach(function(form) {
           <li>Copy the converted output.</li>
         </ol>
       </div>
+    </div>
+    <div class="condition-legend">
+      <div class="condition-legend-header">
+        <span class="condition-legend-title">Condition mapping</span>
+        <span class="condition-legend-direction">ManaBox → TCGplayer CSV</span>
+      </div>
+      <dl class="condition-map-grid">
+        <div class="condition-map-row">
+          <dt><code>mint</code><code>near_mint</code></dt>
+          <dd>Near Mint</dd>
+        </div>
+        <div class="condition-map-row">
+          <dt><code>excellent</code><code>good</code><code>light_played</code></dt>
+          <dd>Lightly Played</dd>
+        </div>
+        <div class="condition-map-row">
+          <dt><code>played</code></dt>
+          <dd>Moderately Played</dd>
+        </div>
+        <div class="condition-map-row">
+          <dt><code>poor</code></dt>
+          <dd>Damaged</dd>
+        </div>
+      </dl>
+      <p class="condition-legend-note">Foil cards use the corresponding TCGplayer condition with “Foil” appended.</p>
     </div>
   </div>
 </div>

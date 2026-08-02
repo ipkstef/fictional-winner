@@ -108,15 +108,18 @@ export interface SkuRow {
 
 // Lookup maps
 export const CONDITION_MAP: Record<string, number> = {
+  // ManaBox condition values
   mint: 1,
   near_mint: 1,
   excellent: 2,
-  good: 3,
+  good: 2,
   light_played: 2,
-  lightly_played: 2,
-  played: 4,
-  heavily_played: 4,
+  played: 3,
   poor: 5,
+
+  // Accepted TCGplayer-style aliases
+  lightly_played: 2,
+  heavily_played: 4,
   damaged: 5,
 };
 
@@ -152,4 +155,3 @@ export const CONDITION_NAMES: Record<number, string> = {
   4: 'Heavily Played',
   5: 'Damaged',
 };
-
