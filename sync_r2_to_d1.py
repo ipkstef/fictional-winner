@@ -115,11 +115,20 @@ def download_parquet_to_sqlite() -> None:
         log(f"  Copying {name}...", end=" ", flush=True)
 
         if name == "groups":
-            # Convert boolean to integer for SQLite
+            # D1 schema and the worker's groups query both expect an is_current
+            # column. The R2 Parquet dropped it (observed 2026-10-01), so keep
+            # the column in the output and only read it when the source has it.
+            source_cols = {
+                row[0] for row in conn.execute(f"DESCRIBE SELECT * FROM '{path}'").fetchall()
+            }
+            if "is_current" in source_cols:
+                is_current_expr = "CASE WHEN is_current THEN 1 ELSE 0 END"
+            else:
+                is_current_expr = "CAST(NULL AS BIGINT)"
             conn.execute(f"""
                 CREATE TABLE {name} AS
                 SELECT group_id, name, abbr,
-                       CASE WHEN is_current THEN 1 ELSE 0 END AS is_current
+                       {is_current_expr} AS is_current
                 FROM '{path}'
             """)
         else:
