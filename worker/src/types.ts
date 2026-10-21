@@ -137,15 +137,18 @@ export const LANGUAGE_MAP: Record<string, number> = {
   es: 11,
 };
 
+// TCGplayer catalog rarity_id -> bulk-CSV rarity code.
+// The R2 parquet renumbered these (observed 2026-10): 1-4 are mythic..common,
+// promo moved to 5, and land/token/special use 107/108/111.
 export const RARITY_MAP: Record<number, string> = {
-  1: 'C',  // Common
-  2: 'U',  // Uncommon
-  3: 'R',  // Rare
-  4: 'M',  // Mythic
-  5: 'S',  // Special
-  6: 'L',  // Land
-  7: 'P',  // Promo
-  8: 'T',  // Token
+  1: 'M',    // Mythic
+  2: 'R',    // Rare
+  3: 'U',    // Uncommon
+  4: 'C',    // Common
+  5: 'P',    // Promo
+  107: 'L',  // Land
+  108: 'T',  // Token
+  111: 'S',  // Special
 };
 
 export const CONDITION_NAMES: Record<number, string> = {
